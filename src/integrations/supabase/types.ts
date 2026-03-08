@@ -14,7 +14,143 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      candidates: {
+        Row: {
+          created_at: string
+          id: string
+          id_number: string | null
+          name: string
+          score: number | null
+          session_id: string
+          status: string
+          summary: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          id_number?: string | null
+          name: string
+          score?: number | null
+          session_id: string
+          status?: string
+          summary?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          id_number?: string | null
+          name?: string
+          score?: number | null
+          session_id?: string
+          status?: string
+          summary?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "candidates_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      documents: {
+        Row: {
+          candidate_id: string | null
+          candidate_name_extracted: string | null
+          confidence_score: number | null
+          created_at: string
+          document_type: string | null
+          file_name: string
+          file_path: string
+          file_size: number
+          id: string
+          issues: string[] | null
+          processed_at: string | null
+          session_id: string
+          validation_details: Json | null
+          validation_status: string
+        }
+        Insert: {
+          candidate_id?: string | null
+          candidate_name_extracted?: string | null
+          confidence_score?: number | null
+          created_at?: string
+          document_type?: string | null
+          file_name: string
+          file_path: string
+          file_size?: number
+          id?: string
+          issues?: string[] | null
+          processed_at?: string | null
+          session_id: string
+          validation_details?: Json | null
+          validation_status?: string
+        }
+        Update: {
+          candidate_id?: string | null
+          candidate_name_extracted?: string | null
+          confidence_score?: number | null
+          created_at?: string
+          document_type?: string | null
+          file_name?: string
+          file_path?: string
+          file_size?: number
+          id?: string
+          issues?: string[] | null
+          processed_at?: string | null
+          session_id?: string
+          validation_details?: Json | null
+          validation_status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "documents_candidate_id_fkey"
+            columns: ["candidate_id"]
+            isOneToOne: false
+            referencedRelation: "candidates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "documents_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sessions: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          processed_documents: number
+          status: string
+          total_documents: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          processed_documents?: number
+          status?: string
+          total_documents?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          processed_documents?: number
+          status?: string
+          total_documents?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
