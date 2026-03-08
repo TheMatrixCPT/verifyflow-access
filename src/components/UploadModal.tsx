@@ -41,8 +41,7 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId }: UploadMod
     setProgress({ processed: 0, total: files.length });
 
     try {
-      const name = sessionName || `Session ${new Date().toLocaleDateString()}`;
-      const sessionId = await createSession(name);
+      const sessionId = existingSessionId || await createSession(sessionName || `Session ${new Date().toLocaleDateString()}`);
 
       await uploadAndProcessFiles(sessionId, files, (processed, total) => {
         setProgress({ processed, total });
