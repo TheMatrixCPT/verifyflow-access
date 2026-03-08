@@ -72,6 +72,15 @@ const CandidateCard = ({ candidate }: { candidate: CandidateData }) => {
   const cfg = statusConfig[candidate.status];
   const StatusIcon = cfg.icon;
 
+  const handleViewDocument = async (filePath: string) => {
+    const { data, error } = await supabase.storage.from("documents").createSignedUrl(filePath, 300);
+    if (error || !data?.signedUrl) {
+      console.error("Failed to get signed URL:", error);
+      return;
+    }
+    window.open(data.signedUrl, "_blank");
+  };
+
   return (
     <div
       className={`vf-card border-l-4 ${cfg.border} cursor-pointer transition-all duration-200 hover:shadow-[var(--shadow-card-hover)]`}
