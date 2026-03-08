@@ -137,14 +137,52 @@ const Settings = () => {
             <h2 className="text-xl font-semibold text-space-kadet">API Configuration</h2>
             {apiExpanded ? <ChevronUp className="h-5 w-5 text-muted-foreground" /> : <ChevronDown className="h-5 w-5 text-muted-foreground" />}
           </button>
-          {apiExpanded && (
-            <div className="mt-6 space-y-4">
-              <div>
-                <label className="vf-label">API Key</label>
-                <input type="password" className="vf-input" placeholder="Enter your API key" />
-                <p className="vf-helper">Required for document verification API access</p>
+        {apiExpanded && (
+            <div className="mt-6 space-y-6">
+              <div className="p-4 bg-muted/50 rounded-lg border border-border">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xs font-semibold text-success bg-success/10 px-2 py-0.5 rounded-full">Active</span>
+                  <span className="text-sm font-semibold text-space-kadet">Lovable AI (Built-in)</span>
+                </div>
+                <p className="vf-helper mb-0">Pre-configured AI gateway. Powers document analysis with Gemini & GPT models. No API key needed.</p>
               </div>
-              <Button variant="outline" size="sm">Test Connection</Button>
+
+              <div className="border-t border-border pt-4">
+                <p className="text-sm font-semibold text-space-kadet mb-3">Additional AI Providers (Optional)</p>
+                <p className="vf-helper mb-4">Connect additional providers for enhanced image extraction, OCR, and document parsing capabilities.</p>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="vf-label">OpenAI API Key</label>
+                    <input type="password" className="vf-input" placeholder="sk-..." />
+                    <p className="vf-helper">GPT-4o Vision for enhanced image analysis and document understanding</p>
+                  </div>
+
+                  <div>
+                    <label className="vf-label">Fal.ai API Key</label>
+                    <input type="password" className="vf-input" placeholder="fal-..." />
+                    <p className="vf-helper">Fast image processing, OCR, and visual document extraction</p>
+                  </div>
+
+                  <div>
+                    <label className="vf-label">Google Cloud Vision API Key</label>
+                    <input type="password" className="vf-input" placeholder="AIza..." />
+                    <p className="vf-helper">Advanced OCR, handwriting recognition, and stamp/seal detection</p>
+                  </div>
+
+                  <div>
+                    <label className="vf-label">AWS Textract Access Key</label>
+                    <input type="password" className="vf-input" placeholder="AKIA..." />
+                    <p className="vf-helper">Table extraction, form parsing, and structured data extraction from documents</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-border pt-4">
+                <p className="text-xs text-muted-foreground">
+                  These keys are stored securely and used server-side only. The built-in Lovable AI handles all core validation. Additional providers enhance specific capabilities like handwriting OCR, stamp detection, and table extraction.
+                </p>
+              </div>
             </div>
           )}
         </div>
