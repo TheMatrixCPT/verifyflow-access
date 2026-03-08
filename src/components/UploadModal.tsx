@@ -8,9 +8,10 @@ interface UploadModalProps {
   open: boolean;
   onClose: () => void;
   onComplete: (sessionId: string) => void;
+  existingSessionId?: string;
 }
 
-const UploadModal = ({ open, onClose, onComplete }: UploadModalProps) => {
+const UploadModal = ({ open, onClose, onComplete, existingSessionId }: UploadModalProps) => {
   const [sessionName, setSessionName] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -40,8 +41,7 @@ const UploadModal = ({ open, onClose, onComplete }: UploadModalProps) => {
     setProgress({ processed: 0, total: files.length });
 
     try {
-      const name = sessionName || `Session ${new Date().toLocaleDateString()}`;
-      const sessionId = await createSession(name);
+      const sessionId = existingSessionId || await createSession(sessionName || `Session ${new Date().toLocaleDateString()}`);
 
       await uploadAndProcessFiles(sessionId, files, (processed, total) => {
         setProgress({ processed, total });
@@ -106,17 +106,19 @@ const UploadModal = ({ open, onClose, onComplete }: UploadModalProps) => {
           </div>
         ) : (
           <>
-            {/* Session Name */}
-            <div className="mb-6">
-              <label className="vf-label">Session Name (Optional)</label>
-              <input
-                type="text"
-                className="vf-input"
-                placeholder="e.g., Graduate Program 2025 Batch 1"
-                value={sessionName}
-                onChange={(e) => setSessionName(e.target.value)}
-              />
-            </div>
+            {/* Session Name - only for new sessions */}
+            {!existingSessionId && (
+              <div className="mb-6">
+                <label className="vf-label">Session Name (Optional)</label>
+                <input
+                  type="text"
+                  className="vf-input"
+                  placeholder="e.g., Graduate Program 2025 Batch 1"
+                  value={sessionName}
+                  onChange={(e) => setSessionName(e.target.value)}
+                />
+              </div>
+            )}
 
             {/* Drop Zone */}
             <div
