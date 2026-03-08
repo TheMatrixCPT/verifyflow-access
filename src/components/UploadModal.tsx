@@ -106,17 +106,19 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId }: UploadMod
           </div>
         ) : (
           <>
-            {/* Session Name */}
-            <div className="mb-6">
-              <label className="vf-label">Session Name (Optional)</label>
-              <input
-                type="text"
-                className="vf-input"
-                placeholder="e.g., Graduate Program 2025 Batch 1"
-                value={sessionName}
-                onChange={(e) => setSessionName(e.target.value)}
-              />
-            </div>
+            {/* Session Name - only for new sessions */}
+            {!existingSessionId && (
+              <div className="mb-6">
+                <label className="vf-label">Session Name (Optional)</label>
+                <input
+                  type="text"
+                  className="vf-input"
+                  placeholder="e.g., Graduate Program 2025 Batch 1"
+                  value={sessionName}
+                  onChange={(e) => setSessionName(e.target.value)}
+                />
+              </div>
+            )}
 
             {/* Drop Zone */}
             <div
