@@ -197,6 +197,7 @@ const SessionDetail = () => {
         open={uploadOpen}
         onClose={() => setUploadOpen(false)}
         onComplete={handleUploadComplete}
+        existingSessionId={id}
       />
     </div>
   );
