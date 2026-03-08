@@ -121,7 +121,17 @@ VALIDATION OUTPUT RULES:
 - If analysing from filename only (no image content), note that visual checks are pending and set appropriate confidence`;
 }
 
+function isPdfFile(fileName: string): boolean {
+  return fileName.toLowerCase().endsWith('.pdf');
+}
+
 async function analyzeWithOpenAI(apiKey: string, systemPrompt: string, fileUrl: string, fileName: string) {
+  // OpenAI Vision API doesn't support PDF URLs - only images (jpg, png, gif, webp)
+  if (isPdfFile(fileName)) {
+    console.log("Skipping OpenAI for PDF file - not supported by Vision API");
+    return null; // Signal to use fallback
+  }
+
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
