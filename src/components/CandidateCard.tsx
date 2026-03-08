@@ -128,19 +128,20 @@ const CandidateCard = ({ candidate }: { candidate: CandidateData }) => {
                         <span className={statusConfig[doc.status].badge}>{statusConfig[doc.status].label}</span>
                       </div>
                     </div>
-                    <p className="text-xs text-muted-foreground mb-1 truncate flex items-center gap-1">
+                    <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
                       <Eye className="h-3 w-3 shrink-0" />
                       <span className="truncate">{doc.fileName}</span>
-                      {doc.fileUrl && (
-                        <a
-                          href={doc.fileUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="ml-auto shrink-0 text-xs font-medium text-purple hover:text-purple/80 underline"
-                          onClick={(e) => e.stopPropagation()}
+                      {doc.filePath && (
+                        <button
+                          className="ml-auto shrink-0 text-xs font-medium text-purple hover:text-purple/80 underline flex items-center gap-0.5"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleViewDocument(doc.filePath!);
+                          }}
                         >
-                          View Document
-                        </a>
+                          <ExternalLink className="h-3 w-3" />
+                          View
+                        </button>
                       )}
                     </p>
                     {doc.summary && (
