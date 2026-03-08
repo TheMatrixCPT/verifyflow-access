@@ -15,6 +15,7 @@ interface ReportCandidate {
     confidence: number;
     summary?: string;
     issues?: string[];
+    checks?: { name: string; status: string; detail: string }[];
   }[];
 }
 
