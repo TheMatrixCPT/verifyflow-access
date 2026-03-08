@@ -9,6 +9,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getSession, getCandidates, getDocuments } from "@/lib/api";
 import { format } from "date-fns";
 import { toast } from "sonner";
+import { generateReport } from "@/lib/generateReport";
 import type { DocumentData } from "@/components/CandidateCard";
 
 type FilterType = "all" | "pass" | "warning" | "fail";
@@ -80,39 +81,14 @@ const SessionDetail = () => {
       return;
     }
 
-    const rows: string[][] = [
-      ["Candidate", "Status", "Score", "Document", "Doc Type", "Doc Status", "Confidence", "Issues", "Summary"],
-    ];
+    generateReport({
+      sessionName: session?.name || "Report",
+      sessionDate: session ? format(new Date(session.created_at), "dd MMM yyyy, HH:mm") : "",
+      stats,
+      candidates: candidatesWithDocs,
+    });
 
-    for (const c of candidatesWithDocs) {
-      if (c.documents.length === 0) {
-        rows.push([c.name, c.status, String(c.score), "", "", "", "", c.issues.join("; "), c.summary]);
-      } else {
-        for (const d of c.documents) {
-          rows.push([
-            c.name,
-            c.status,
-            String(c.score),
-            d.fileName,
-            d.type,
-            d.status,
-            String(d.confidence),
-            (d.issues || []).join("; "),
-            d.summary || "",
-          ]);
-        }
-      }
-    }
-
-    const csv = rows.map((r) => r.map((v) => `"${v.replace(/"/g, '""')}"`).join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${session?.name || "report"}-${format(new Date(), "yyyy-MM-dd")}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success("Report downloaded");
+    toast.success("PDF report downloaded");
   };
 
   const handleUploadComplete = (sessionId: string) => {
