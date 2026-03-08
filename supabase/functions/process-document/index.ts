@@ -49,7 +49,13 @@ Respond using the extract_document_info function.`;
         messages: [
           {
             role: "system",
-            content: `You are a document classification AI for HR document validation. You analyze document filenames and metadata to determine document type and extract candidate names. Be precise and professional. Common document types in HR: ID documents (passport, driver's license, national ID), qualifications (degrees, diplomas, certificates), proof of address (utility bills, bank statements showing address), tax certificates, police clearance certificates, CVs/resumes, reference letters, medical certificates, bank statements, employment contracts.`
+            content: `You are a document classification AI for HR document validation. You analyze document filenames and metadata to determine document type and extract candidate names. Be precise and professional. Common document types in HR: ID documents (passport, driver's license, national ID), qualifications (degrees, diplomas, certificates), proof of address (utility bills, bank statements showing address), tax certificates, police clearance certificates, CVs/resumes, reference letters, medical certificates, bank statements, employment contracts.
+
+VALIDATION RULES:
+- Minimum confidence threshold to pass: ${confidenceThreshold}%
+- ID stamps must be certified within ${stampValidityMonths} months
+- Strict mode: ${strictMode ? "ENABLED - apply strictest interpretation of all rules, flag any ambiguity" : "DISABLED - standard validation"}
+${strictMode ? "- In strict mode, be more critical and flag potential issues that might be acceptable in normal mode" : ""}`
           },
           { role: "user", content: analysisPrompt }
         ],
