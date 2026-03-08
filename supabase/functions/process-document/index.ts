@@ -19,7 +19,6 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Update document status to processing
     await supabase.from("documents").update({ validation_status: "processing" }).eq("id", document_id);
 
     // Load settings
@@ -28,15 +27,81 @@ serve(async (req) => {
     const stampValidityMonths = settings?.stamp_validity_months || 3;
     const strictMode = settings?.strict_mode || false;
 
-    // Use Lovable AI to analyze the document based on filename and metadata
-    const analysisPrompt = `Analyze this document filename and determine:
-1. The type of document (one of: "ID Document", "Qualification", "Proof of Address", "Tax Certificate", "Police Clearance", "CV/Resume", "Reference Letter", "Medical Certificate", "Bank Statement", "Employment Contract", "Other")
-2. Extract any person's name that might be in the filename
-3. Provide a validation assessment
+    const systemPrompt = `You are a South African HR document validation AI for CapaCiTi / Capaciti training programme compliance.
+Your job is to validate uploaded candidate documents against strict rules. You do NOT approve candidates — you flag issues clearly so a human admin can make the final decision.
+
+GLOBAL SETTINGS:
+- Minimum confidence to pass: ${confidenceThreshold}%
+- ID certification stamp must be within ${stampValidityMonths} months
+- Strict mode: ${strictMode ? "ENABLED — flag any ambiguity, apply strictest interpretation" : "DISABLED — standard validation"}
+
+DOCUMENT TYPES AND THEIR SPECIFIC VALIDATION RULES:
+
+═══ 1. ID DOCUMENT ═══
+Required checks (each must be reported as pass/fail):
+- Image clarity: Is the image clear and not blurry?
+- Full document visible: No clipping or cut-off edges
+- ID number readable: Can the SA ID number (13 digits) be extracted?
+- Certification stamp present: Is there a commissioner of oaths / police stamp?
+- Stamp authority: Is it stamped by Police or Commissioner of Oaths?
+- Stamp date validity: Is the stamp date ≤ ${stampValidityMonths} months old from today?
+- Document may be skewed/folded (photo from camera on uneven surface) — still must be readable
+- The stamp may be faint — the critical parts are: date of validation + commissioner's signature next to stamp
+
+═══ 2. SIGNED CONTRACT ═══
+Required checks:
+- Signature present at the end of the document
+- Date present at the end of the document
+- ID number present in the contract
+- ID number matches the candidate's ID document (cross-reference if available)
+
+═══ 3. EEA1 FORM (Employment Equity Act) ═══
+Required checks:
+- All required fields completed (not blank)
+- Text is legible
+- Signature present
+- Date present
+- CRITICAL: Check whether "South African" or "Foreigner" is ticked
+  → If "Foreigner" is ticked → REJECT (status: fail)
+  → If neither is ticked (left blank) → REJECT (status: fail)
+  → If "South African" is ticked → PASS this check
+
+═══ 4. AFFIDAVIT ═══
+Required checks:
+- Document is signed
+- Document is dated
+- ID number is present
+- ID number matches the candidate's ID document
+- Follows standard Capaciti affidavit format
+
+═══ 5. ATTENDANCE / TRAINING REGISTER ═══
+Required checks:
+- Candidate's ID number appears in the document
+- ID matches the candidate
+- Signature present next to the candidate's name/ID
+- Date present and valid
+- This may be a scanned paper register with multiple candidate names
+
+═══ OTHER DOCUMENTS ═══
+For any document that doesn't match the above types (Qualification, Proof of Address, Tax Certificate, Police Clearance, CV/Resume, Reference Letter, Medical Certificate, Bank Statement):
+- Check image clarity
+- Check for signatures where expected
+- Check for dates where expected
+- Extract any ID numbers present
+
+VALIDATION OUTPUT RULES:
+- For each check performed, include it in the "checks" array with name, status (pass/warning/fail), and detail
+- Overall status: "fail" if ANY critical check fails, "warning" if non-critical issues exist, "pass" if all checks pass
+- Provide a plain-English explanation of findings
+- Be specific about what failed and why
+- If analysing from filename only (no image content), note that visual checks are pending and set appropriate confidence`;
+
+    const analysisPrompt = `Analyze this document and determine its type, validate it against the rules, and extract candidate information.
 
 Filename: "${file_name}"
+File URL: ${file_url}
 
-Respond using the extract_document_info function.`;
+Respond using the extract_document_info function. Be thorough in your validation checks.`;
 
     const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -45,36 +110,33 @@ Respond using the extract_document_info function.`;
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
+        model: "google/gemini-2.5-flash",
         messages: [
-          {
-            role: "system",
-            content: `You are a document classification AI for HR document validation. You analyze document filenames and metadata to determine document type and extract candidate names. Be precise and professional. Common document types in HR: ID documents (passport, driver's license, national ID), qualifications (degrees, diplomas, certificates), proof of address (utility bills, bank statements showing address), tax certificates, police clearance certificates, CVs/resumes, reference letters, medical certificates, bank statements, employment contracts.
-
-VALIDATION RULES:
-- Minimum confidence threshold to pass: ${confidenceThreshold}%
-- ID stamps must be certified within ${stampValidityMonths} months
-- Strict mode: ${strictMode ? "ENABLED - apply strictest interpretation of all rules, flag any ambiguity" : "DISABLED - standard validation"}
-${strictMode ? "- In strict mode, be more critical and flag potential issues that might be acceptable in normal mode" : ""}`
-          },
+          { role: "system", content: systemPrompt },
           { role: "user", content: analysisPrompt }
         ],
         tools: [{
           type: "function",
           function: {
             name: "extract_document_info",
-            description: "Extract document type and candidate name from a document",
+            description: "Extract and validate document information",
             parameters: {
               type: "object",
               properties: {
                 document_type: {
                   type: "string",
-                  enum: ["ID Document", "Qualification", "Proof of Address", "Tax Certificate", "Police Clearance", "CV/Resume", "Reference Letter", "Medical Certificate", "Bank Statement", "Employment Contract", "Other"],
+                  enum: [
+                    "ID Document", "Signed Contract", "EEA1 Form", "Affidavit",
+                    "Attendance Register", "Qualification", "Proof of Address",
+                    "Tax Certificate", "Police Clearance", "CV/Resume",
+                    "Reference Letter", "Medical Certificate", "Bank Statement",
+                    "Employment Contract", "Other"
+                  ],
                   description: "The type of HR document"
                 },
                 candidate_name: {
                   type: "string",
-                  description: "The person's name extracted from the filename, or 'Unknown' if not determinable"
+                  description: "The person's name extracted from the filename or document content, or 'Unknown' if not determinable"
                 },
                 confidence: {
                   type: "number",
@@ -83,19 +145,36 @@ ${strictMode ? "- In strict mode, be more critical and flag potential issues tha
                 validation_status: {
                   type: "string",
                   enum: ["pass", "warning", "fail"],
-                  description: "Initial validation status based on filename analysis"
+                  description: "Overall validation status"
+                },
+                checks: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      name: { type: "string", description: "Name of the check performed" },
+                      status: { type: "string", enum: ["pass", "warning", "fail"] },
+                      detail: { type: "string", description: "Explanation of the check result" }
+                    },
+                    required: ["name", "status", "detail"]
+                  },
+                  description: "Individual validation checks performed on this document"
                 },
                 issues: {
                   type: "array",
                   items: { type: "string" },
-                  description: "Any issues found"
+                  description: "List of issues found — plain English, actionable"
                 },
                 summary: {
                   type: "string",
-                  description: "Brief validation summary"
+                  description: "Plain-English validation summary explaining the overall result"
+                },
+                extracted_id_number: {
+                  type: "string",
+                  description: "SA ID number (13 digits) if found in the document, or null"
                 }
               },
-              required: ["document_type", "candidate_name", "confidence", "validation_status", "summary"],
+              required: ["document_type", "candidate_name", "confidence", "validation_status", "checks", "issues", "summary"],
               additionalProperties: false
             }
           }
@@ -112,7 +191,7 @@ ${strictMode ? "- In strict mode, be more critical and flag potential issues tha
         });
       }
       if (status === 402) {
-        return new Response(JSON.stringify({ error: "AI credits exhausted. Please add funds." }), {
+        return new Response(JSON.stringify({ error: "AI credits exhausted." }), {
           status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" }
         });
       }
@@ -129,8 +208,10 @@ ${strictMode ? "- In strict mode, be more critical and flag potential issues tha
       candidate_name: "Unknown",
       confidence: 50,
       validation_status: "warning",
+      checks: [] as { name: string; status: string; detail: string }[],
       issues: [] as string[],
-      summary: "Could not fully analyze document"
+      summary: "Could not fully analyze document",
+      extracted_id_number: null as string | null,
     };
 
     if (toolCall?.function?.arguments) {
@@ -148,7 +229,11 @@ ${strictMode ? "- In strict mode, be more critical and flag potential issues tha
       confidence_score: extracted.confidence,
       validation_status: extracted.validation_status,
       issues: extracted.issues || [],
-      validation_details: { summary: extracted.summary },
+      validation_details: {
+        summary: extracted.summary,
+        checks: extracted.checks || [],
+        extracted_id_number: extracted.extracted_id_number || null,
+      },
       processed_at: new Date().toISOString(),
     }).eq("id", document_id);
 

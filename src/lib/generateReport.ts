@@ -15,6 +15,7 @@ interface ReportCandidate {
     confidence: number;
     summary?: string;
     issues?: string[];
+    checks?: { name: string; status: string; detail: string }[];
   }[];
 }
 
@@ -207,7 +208,48 @@ export function generateReport(data: ReportData) {
         },
       });
 
-      y = (doc as any).lastAutoTable.finalY + 8;
+      y = (doc as any).lastAutoTable.finalY + 4;
+
+      // Per-document validation checks
+      candidate.documents.forEach((d) => {
+        if (!d.checks || d.checks.length === 0) return;
+
+        if (y > doc.internal.pageSize.getHeight() - 40) {
+          doc.addPage();
+          y = 16;
+        }
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(7);
+        doc.setTextColor(...COLORS.navy);
+        doc.text(`Checks: ${d.fileName}`, margin + 2, y + 3);
+        y += 5;
+
+        autoTable(doc, {
+          startY: y,
+          margin: { left: margin + 2, right: margin + 2 },
+          head: [["Check", "Result", "Detail"]],
+          body: d.checks.map((c) => [c.name, statusLabel(c.status), c.detail]),
+          theme: "grid",
+          headStyles: { fillColor: COLORS.navy, textColor: COLORS.white, fontSize: 6, fontStyle: "bold", cellPadding: 1.5 },
+          bodyStyles: { fontSize: 6, cellPadding: 1.5, textColor: [51, 51, 51] },
+          alternateRowStyles: { fillColor: [249, 250, 251] },
+          columnStyles: { 0: { cellWidth: 35 }, 1: { cellWidth: 18, halign: "center" }, 2: { cellWidth: "auto" } },
+          didParseCell: (data) => {
+            if (data.column.index === 1 && data.section === "body") {
+              const val = String(data.cell.raw);
+              if (val === "PASSED") data.cell.styles.textColor = COLORS.green;
+              else if (val === "WARNING") data.cell.styles.textColor = COLORS.amber;
+              else if (val === "FAILED") data.cell.styles.textColor = COLORS.red;
+              data.cell.styles.fontStyle = "bold";
+            }
+          },
+        });
+
+        y = (doc as any).lastAutoTable.finalY + 4;
+      });
+
+      y += 4;
     }
   });
 

@@ -1,6 +1,12 @@
 import { useState } from "react";
 import { ChevronDown, CheckCircle, AlertTriangle, XCircle, FileText, Eye } from "lucide-react";
 
+export interface DocumentCheck {
+  name: string;
+  status: "pass" | "warning" | "fail";
+  detail: string;
+}
+
 export interface DocumentData {
   type: string;
   status: "pass" | "warning" | "fail";
@@ -8,6 +14,8 @@ export interface DocumentData {
   confidence: number;
   summary?: string;
   issues?: string[];
+  checks?: DocumentCheck[];
+  extractedIdNumber?: string;
 }
 
 export interface CandidateData {
@@ -49,6 +57,12 @@ const docStatusIcon = {
   pass: { icon: CheckCircle, color: "text-success", bg: "bg-success/10" },
   warning: { icon: AlertTriangle, color: "text-warning", bg: "bg-warning/10" },
   fail: { icon: XCircle, color: "text-error", bg: "bg-error/10" },
+};
+
+const checkStatusIcon = {
+  pass: { icon: CheckCircle, color: "text-success" },
+  warning: { icon: AlertTriangle, color: "text-warning" },
+  fail: { icon: XCircle, color: "text-error" },
 };
 
 const CandidateCard = ({ candidate }: { candidate: CandidateData }) => {
@@ -109,6 +123,38 @@ const CandidateCard = ({ candidate }: { candidate: CandidateData }) => {
                     {doc.summary && (
                       <p className="text-sm text-foreground mt-2">{doc.summary}</p>
                     )}
+
+                    {/* Individual Validation Checks */}
+                    {doc.checks && doc.checks.length > 0 && (
+                      <div className="mt-3 bg-card rounded-md border border-border overflow-hidden">
+                        <p className="text-xs font-semibold text-space-kadet px-3 py-1.5 bg-muted border-b border-border">
+                          Validation Checks
+                        </p>
+                        <div className="divide-y divide-border">
+                          {doc.checks.map((check, j) => {
+                            const chk = checkStatusIcon[check.status as keyof typeof checkStatusIcon] || checkStatusIcon.warning;
+                            const ChkIcon = chk.icon;
+                            return (
+                              <div key={j} className="flex items-start gap-2 px-3 py-2">
+                                <ChkIcon className={`h-3.5 w-3.5 mt-0.5 shrink-0 ${chk.color}`} />
+                                <div className="min-w-0">
+                                  <span className="text-xs font-medium text-space-kadet">{check.name}</span>
+                                  <p className="text-xs text-muted-foreground">{check.detail}</p>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Extracted ID number */}
+                    {doc.extractedIdNumber && (
+                      <p className="text-xs text-muted-foreground mt-2">
+                        <span className="font-medium text-space-kadet">Extracted ID:</span> {doc.extractedIdNumber}
+                      </p>
+                    )}
+
                     {doc.issues && doc.issues.length > 0 && (
                       <div className="mt-2 space-y-1">
                         {doc.issues.map((issue, j) => (
