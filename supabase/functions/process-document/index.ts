@@ -121,7 +121,17 @@ VALIDATION OUTPUT RULES:
 - If analysing from filename only (no image content), note that visual checks are pending and set appropriate confidence`;
 }
 
+function isPdfFile(fileName: string): boolean {
+  return fileName.toLowerCase().endsWith('.pdf');
+}
+
 async function analyzeWithOpenAI(apiKey: string, systemPrompt: string, fileUrl: string, fileName: string) {
+  // OpenAI Vision API doesn't support PDF URLs - only images (jpg, png, gif, webp)
+  if (isPdfFile(fileName)) {
+    console.log("Skipping OpenAI for PDF file - not supported by Vision API");
+    return null; // Signal to use fallback
+  }
+
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -197,17 +207,22 @@ serve(async (req) => {
     let aiResponse: Response;
     let aiProvider = "lovable";
 
-    // Try OpenAI first (better vision capabilities), fall back to Lovable AI
+    // Try OpenAI first for images (better vision), fall back to Lovable AI for PDFs and errors
     if (OPENAI_API_KEY) {
-      console.log("Using OpenAI GPT-4o Vision for document analysis");
-      aiProvider = "openai";
-      aiResponse = await analyzeWithOpenAI(OPENAI_API_KEY, systemPrompt, file_url, file_name);
+      const openaiResult = await analyzeWithOpenAI(OPENAI_API_KEY, systemPrompt, file_url, file_name);
 
-      // If OpenAI fails, fall back to Lovable AI
-      if (!aiResponse.ok && LOVABLE_API_KEY) {
-        console.log(`OpenAI returned ${aiResponse.status}, falling back to Lovable AI`);
+      if (openaiResult && openaiResult.ok) {
+        console.log("Using OpenAI GPT-4o Vision for document analysis");
+        aiProvider = "openai";
+        aiResponse = openaiResult;
+      } else {
+        if (openaiResult) {
+          console.log(`OpenAI returned ${openaiResult.status}, falling back to Lovable AI`);
+        } else {
+          console.log("OpenAI skipped (PDF file), using Lovable AI");
+        }
         aiProvider = "lovable";
-        aiResponse = await analyzeWithLovableAI(LOVABLE_API_KEY, systemPrompt, file_url, file_name);
+        aiResponse = await analyzeWithLovableAI(LOVABLE_API_KEY!, systemPrompt, file_url, file_name);
       }
     } else {
       console.log("Using Lovable AI for document analysis");
