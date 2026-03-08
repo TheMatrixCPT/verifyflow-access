@@ -11,7 +11,7 @@ interface UploadModalProps {
   existingSessionId?: string;
 }
 
-const UploadModal = ({ open, onClose, onComplete }: UploadModalProps) => {
+const UploadModal = ({ open, onClose, onComplete, existingSessionId }: UploadModalProps) => {
   const [sessionName, setSessionName] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
