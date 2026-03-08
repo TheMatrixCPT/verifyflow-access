@@ -207,17 +207,22 @@ serve(async (req) => {
     let aiResponse: Response;
     let aiProvider = "lovable";
 
-    // Try OpenAI first (better vision capabilities), fall back to Lovable AI
+    // Try OpenAI first for images (better vision), fall back to Lovable AI for PDFs and errors
     if (OPENAI_API_KEY) {
-      console.log("Using OpenAI GPT-4o Vision for document analysis");
-      aiProvider = "openai";
-      aiResponse = await analyzeWithOpenAI(OPENAI_API_KEY, systemPrompt, file_url, file_name);
+      const openaiResult = await analyzeWithOpenAI(OPENAI_API_KEY, systemPrompt, file_url, file_name);
 
-      // If OpenAI fails, fall back to Lovable AI
-      if (!aiResponse.ok && LOVABLE_API_KEY) {
-        console.log(`OpenAI returned ${aiResponse.status}, falling back to Lovable AI`);
+      if (openaiResult && openaiResult.ok) {
+        console.log("Using OpenAI GPT-4o Vision for document analysis");
+        aiProvider = "openai";
+        aiResponse = openaiResult;
+      } else {
+        if (openaiResult) {
+          console.log(`OpenAI returned ${openaiResult.status}, falling back to Lovable AI`);
+        } else {
+          console.log("OpenAI skipped (PDF file), using Lovable AI");
+        }
         aiProvider = "lovable";
-        aiResponse = await analyzeWithLovableAI(LOVABLE_API_KEY, systemPrompt, file_url, file_name);
+        aiResponse = await analyzeWithLovableAI(LOVABLE_API_KEY!, systemPrompt, file_url, file_name);
       }
     } else {
       console.log("Using Lovable AI for document analysis");
