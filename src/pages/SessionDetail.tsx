@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import { Upload, Download, Search, Users, CheckCircle, AlertTriangle, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -7,6 +7,7 @@ import CandidateCard from "@/components/CandidateCard";
 import { useQuery } from "@tanstack/react-query";
 import { getSession, getCandidates, getDocuments } from "@/lib/api";
 import { format } from "date-fns";
+import type { DocumentData } from "@/components/CandidateCard";
 
 type FilterType = "all" | "pass" | "warning" | "fail";
 
@@ -33,21 +34,26 @@ const SessionDetail = () => {
     enabled: !!id,
   });
 
-  // Build candidate data with their documents
   const candidatesWithDocs = candidates.map((c) => {
     const candidateDocs = documents.filter((d) => d.candidate_id === c.id);
+    const docData: DocumentData[] = candidateDocs.map((d) => ({
+      type: d.document_type || "Unknown",
+      status: (d.validation_status as "pass" | "warning" | "fail") || "pass",
+      fileName: d.file_name,
+      confidence: Number(d.confidence_score) || 0,
+      summary: (d.validation_details as any)?.summary || undefined,
+      issues: d.issues && d.issues.length > 0 ? d.issues : undefined,
+    }));
+
     return {
       id: c.id,
       name: c.name,
       idNumber: c.id_number || "N/A",
       score: c.score || 0,
       status: (c.status as "pass" | "warning" | "fail") || "pass",
-      documents: candidateDocs.map((d) => ({
-        type: d.document_type || "Unknown",
-        status: (d.validation_status as "pass" | "warning" | "fail") || "pass",
-      })),
+      documents: docData,
       summary: c.summary || "No summary available",
-      issues: candidateDocs.flatMap((d) => d.issues || []),
+      issues: candidateDocs.flatMap((d) => d.issues || []).filter(Boolean),
     };
   });
 
@@ -68,7 +74,6 @@ const SessionDetail = () => {
     <div className="min-h-screen bg-background">
       <Header />
 
-      {/* Page Header */}
       <div className="bg-space-kadet px-8 py-6">
         <div className="max-w-[1400px] mx-auto">
           <Link to="/" className="inline-flex items-center gap-1.5 text-primary-foreground/70 text-sm mb-3 hover:text-primary-foreground transition-colors">
@@ -93,7 +98,6 @@ const SessionDetail = () => {
         </div>
       </div>
 
-      {/* Stats Bar */}
       <div className="bg-pink/30 border-b border-border">
         <div className="max-w-[1400px] mx-auto px-8 py-4 flex gap-8 flex-wrap">
           <div className="flex items-center gap-2">
@@ -114,28 +118,15 @@ const SessionDetail = () => {
         </div>
       </div>
 
-      {/* Search & Filter */}
       <div className="bg-card border-b border-border">
         <div className="max-w-[1400px] mx-auto px-8 py-4 flex items-center justify-between gap-4 flex-wrap">
           <div className="relative w-[300px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <input
-              type="text"
-              className="vf-input pl-10"
-              placeholder="Search by name or ID..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
+            <input type="text" className="vf-input pl-10" placeholder="Search by name or ID..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
           </div>
           <div className="flex items-center gap-2">
             {(["all", "pass", "warning", "fail"] as FilterType[]).map((f) => (
-              <Button
-                key={f}
-                variant={filter === f ? "outline" : "secondary"}
-                size="sm"
-                onClick={() => setFilter(f)}
-                className={filter === f ? "border-purple text-purple" : ""}
-              >
+              <Button key={f} variant={filter === f ? "outline" : "secondary"} size="sm" onClick={() => setFilter(f)} className={filter === f ? "border-purple text-purple" : ""}>
                 {f === "all" ? "All" : f === "pass" ? "Validated" : f === "warning" ? "Has Issues" : "Failed"}
               </Button>
             ))}
@@ -144,7 +135,6 @@ const SessionDetail = () => {
         </div>
       </div>
 
-      {/* Candidates Grid */}
       <div className="max-w-[1400px] mx-auto px-8 py-8">
         {filtered.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

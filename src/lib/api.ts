@@ -12,11 +12,8 @@ export async function createSession(name: string): Promise<string> {
 
 export async function uploadAndProcessFiles(sessionId: string, files: File[], onProgress: (processed: number, total: number) => void) {
   const total = files.length;
-
-  // Update session with total count
   await supabase.from("sessions").update({ total_documents: total, status: "processing" }).eq("id", sessionId);
 
-  // Upload all files to storage first (parallel, batched)
   const BATCH_SIZE = 5;
   const documentRecords: { id: string; fileName: string; filePath: string; fileSize: number }[] = [];
 
@@ -27,7 +24,6 @@ export async function uploadAndProcessFiles(sessionId: string, files: File[], on
       const { error: uploadError } = await supabase.storage.from("documents").upload(filePath, file);
       if (uploadError) throw uploadError;
 
-      // Create document record
       const { data: doc, error: docError } = await supabase
         .from("documents")
         .insert({
@@ -46,14 +42,12 @@ export async function uploadAndProcessFiles(sessionId: string, files: File[], on
     documentRecords.push(...results);
   }
 
-  // Now process each document with AI (parallel batches)
   let processed = 0;
   for (let i = 0; i < documentRecords.length; i += BATCH_SIZE) {
     const batch = documentRecords.slice(i, i + BATCH_SIZE);
     const processing = batch.map(async (doc) => {
       try {
         const { data: urlData } = supabase.storage.from("documents").getPublicUrl(doc.filePath);
-
         const { data, error } = await supabase.functions.invoke("process-document", {
           body: {
             document_id: doc.id,
@@ -61,7 +55,6 @@ export async function uploadAndProcessFiles(sessionId: string, files: File[], on
             file_name: doc.fileName,
           },
         });
-
         if (error) console.error("Processing error for", doc.fileName, error);
         return data;
       } catch (e) {
@@ -73,12 +66,9 @@ export async function uploadAndProcessFiles(sessionId: string, files: File[], on
     const results = await Promise.all(processing);
     processed += results.length;
     onProgress(processed, total);
-
-    // Update session progress
     await supabase.from("sessions").update({ processed_documents: processed }).eq("id", sessionId);
   }
 
-  // After all processing, group documents by candidate name and create candidates
   const { data: docs } = await supabase
     .from("documents")
     .select("*")
@@ -100,6 +90,8 @@ export async function uploadAndProcessFiles(sessionId: string, files: File[], on
       const hasWarning = candidateDocs.some((d) => d.validation_status === "warning");
       const status = hasFailure ? "fail" : hasWarning ? "warning" : "pass";
 
+      const allIssues = candidateDocs.flatMap((d) => d.issues || []);
+
       const { data: candidate } = await supabase
         .from("candidates")
         .insert({
@@ -107,13 +99,12 @@ export async function uploadAndProcessFiles(sessionId: string, files: File[], on
           name,
           score: avgScore,
           status,
-          summary: `${candidateDocs.length} document(s) processed. ${hasFailure ? "Some documents failed validation." : hasWarning ? "Some documents have warnings." : "All documents passed."}`,
+          summary: `${candidateDocs.length} document(s) processed. ${hasFailure ? "Some documents failed validation." : hasWarning ? "Some documents have warnings." : "All documents passed."}${allIssues.length > 0 ? " Issues: " + allIssues.join("; ") : ""}`,
         })
         .select("id")
         .single();
 
       if (candidate) {
-        // Link documents to candidate
         for (const doc of candidateDocs) {
           await supabase.from("documents").update({ candidate_id: candidate.id }).eq("id", doc.id);
         }
@@ -121,7 +112,6 @@ export async function uploadAndProcessFiles(sessionId: string, files: File[], on
     }
   }
 
-  // Update session status
   const { data: finalDocs } = await supabase
     .from("documents")
     .select("validation_status")
@@ -174,11 +164,38 @@ export async function getDocuments(sessionId: string, candidateId?: string) {
 }
 
 export async function deleteSession(id: string) {
-  // Delete storage files first
   const { data: docs } = await supabase.from("documents").select("file_path").eq("session_id", id);
   if (docs && docs.length > 0) {
     await supabase.storage.from("documents").remove(docs.map((d) => d.file_path));
   }
   const { error } = await supabase.from("sessions").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// Settings
+export async function getSettings() {
+  const { data, error } = await supabase
+    .from("settings")
+    .select("*")
+    .limit(1)
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateSettings(settings: {
+  confidence_threshold: number;
+  stamp_validity_months: number;
+  strict_mode: boolean;
+  from_email?: string;
+}) {
+  // Get the single settings row
+  const { data: existing } = await supabase.from("settings").select("id").limit(1).single();
+  if (!existing) throw new Error("No settings found");
+
+  const { error } = await supabase
+    .from("settings")
+    .update(settings)
+    .eq("id", existing.id);
   if (error) throw error;
 }
