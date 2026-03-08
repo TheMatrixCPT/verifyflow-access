@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { ChevronDown, CheckCircle, AlertTriangle, XCircle, FileText, Eye } from "lucide-react";
+import { ChevronDown, CheckCircle, AlertTriangle, XCircle, FileText, Eye, ExternalLink } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
 
 export interface DocumentCheck {
   name: string;
