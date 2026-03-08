@@ -22,6 +22,12 @@ serve(async (req) => {
     // Update document status to processing
     await supabase.from("documents").update({ validation_status: "processing" }).eq("id", document_id);
 
+    // Load settings
+    const { data: settings } = await supabase.from("settings").select("*").limit(1).single();
+    const confidenceThreshold = settings?.confidence_threshold || 80;
+    const stampValidityMonths = settings?.stamp_validity_months || 3;
+    const strictMode = settings?.strict_mode || false;
+
     // Use Lovable AI to analyze the document based on filename and metadata
     const analysisPrompt = `Analyze this document filename and determine:
 1. The type of document (one of: "ID Document", "Qualification", "Proof of Address", "Tax Certificate", "Police Clearance", "CV/Resume", "Reference Letter", "Medical Certificate", "Bank Statement", "Employment Contract", "Other")
