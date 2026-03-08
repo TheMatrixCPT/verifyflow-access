@@ -6,37 +6,6 @@ import Header from "@/components/Header";
 import SessionCard from "@/components/SessionCard";
 import UploadModal from "@/components/UploadModal";
 
-// Demo data
-const demoSessions = [
-  {
-    id: "1",
-    name: "Graduate Program 2025 Batch 1",
-    timestamp: "Mar 7, 2026 at 14:32",
-    status: "complete" as const,
-    totalCandidates: 47,
-    validatedCandidates: 47,
-    progress: 100,
-  },
-  {
-    id: "2",
-    name: "Engineering Internship Q2",
-    timestamp: "Mar 6, 2026 at 09:15",
-    status: "has-issues" as const,
-    totalCandidates: 23,
-    validatedCandidates: 20,
-    progress: 87,
-  },
-  {
-    id: "3",
-    name: "Marketing Team Expansion",
-    timestamp: "Mar 5, 2026 at 16:48",
-    status: "in-progress" as const,
-    totalCandidates: 12,
-    validatedCandidates: 8,
-    progress: 67,
-  },
-];
-
 const Index = () => {
   const [uploadOpen, setUploadOpen] = useState(false);
   const navigate = useNavigate();
@@ -68,7 +37,7 @@ const Index = () => {
             Start Validating Documents
           </Button>
           <p className="text-[13px] text-muted-foreground mt-4">
-            Sessions are automatically deleted after 30 days
+            Your data is retained until you choose to delete it
           </p>
         </div>
       </section>
@@ -77,23 +46,15 @@ const Index = () => {
       <section className="vf-section">
         <h2 className="text-2xl font-semibold text-space-kadet mb-8">Recent Validation Sessions</h2>
 
-        {demoSessions.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {demoSessions.map((session) => (
-              <SessionCard key={session.id} {...session} onClick={handleSessionClick} />
-            ))}
-          </div>
-        ) : (
-          <div className="text-center py-16 max-w-[400px] mx-auto">
-            <FileSearch className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-space-kadet mb-2">No validation sessions yet</h3>
-            <p className="text-muted-foreground mb-6">Upload documents to get started</p>
-            <Button variant="default" onClick={() => setUploadOpen(true)}>
-              <Upload className="h-5 w-5" />
-              Upload Documents
-            </Button>
-          </div>
-        )}
+        <div className="text-center py-16 max-w-[400px] mx-auto">
+          <FileSearch className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
+          <h3 className="text-xl font-semibold text-space-kadet mb-2">No validation sessions yet</h3>
+          <p className="text-muted-foreground mb-6">Upload documents to get started</p>
+          <Button variant="default" onClick={() => setUploadOpen(true)}>
+            <Upload className="h-5 w-5" />
+            Upload Documents
+          </Button>
+        </div>
       </section>
 
       <UploadModal open={uploadOpen} onClose={() => setUploadOpen(false)} onProcess={handleProcess} />
