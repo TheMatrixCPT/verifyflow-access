@@ -7,7 +7,7 @@ import CandidateCard from "@/components/CandidateCard";
 import UploadModal from "@/components/UploadModal";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getSession, getCandidates, getDocuments } from "@/lib/api";
-import { format } from "date-fns";
+import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { generateReport } from "@/lib/generateReport";
 import type { DocumentData } from "@/components/CandidateCard";
