@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
 import { Upload, Download, Search, Users, CheckCircle, AlertTriangle, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -7,6 +7,7 @@ import CandidateCard from "@/components/CandidateCard";
 import UploadModal from "@/components/UploadModal";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getSession, getCandidates, getDocuments } from "@/lib/api";
+import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { generateReport } from "@/lib/generateReport";
@@ -39,12 +40,13 @@ const SessionDetail = () => {
     enabled: !!id,
   });
 
-  const candidatesWithDocs = candidates.map((c) => {
+  const candidatesWithDocs = useMemo(() => candidates.map((c) => {
     const candidateDocs = documents.filter((d) => d.candidate_id === c.id);
     const docData: DocumentData[] = candidateDocs.map((d) => ({
       type: d.document_type || "Unknown",
       status: (d.validation_status as "pass" | "warning" | "fail") || "pass",
       fileName: d.file_name,
+      filePath: d.file_path,
       confidence: Number(d.confidence_score) || 0,
       summary: (d.validation_details as any)?.summary || undefined,
       issues: d.issues && d.issues.length > 0 ? d.issues : undefined,
@@ -62,7 +64,7 @@ const SessionDetail = () => {
       summary: c.summary || "No summary available",
       issues: candidateDocs.flatMap((d) => d.issues || []).filter(Boolean),
     };
-  });
+  }), [candidates, documents]);
 
   const filtered = candidatesWithDocs.filter((c) => {
     const matchesSearch = c.name.toLowerCase().includes(searchQuery.toLowerCase()) || c.idNumber.includes(searchQuery);

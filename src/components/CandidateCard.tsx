@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { ChevronDown, CheckCircle, AlertTriangle, XCircle, FileText, Eye } from "lucide-react";
+import { ChevronDown, CheckCircle, AlertTriangle, XCircle, FileText, Eye, ExternalLink } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
 
 export interface DocumentCheck {
   name: string;
@@ -16,6 +17,7 @@ export interface DocumentData {
   issues?: string[];
   checks?: DocumentCheck[];
   extractedIdNumber?: string;
+  filePath?: string;
 }
 
 export interface CandidateData {
@@ -70,6 +72,15 @@ const CandidateCard = ({ candidate }: { candidate: CandidateData }) => {
   const cfg = statusConfig[candidate.status];
   const StatusIcon = cfg.icon;
 
+  const handleViewDocument = async (filePath: string) => {
+    const { data, error } = await supabase.storage.from("documents").createSignedUrl(filePath, 300);
+    if (error || !data?.signedUrl) {
+      console.error("Failed to get signed URL:", error);
+      return;
+    }
+    window.open(data.signedUrl, "_blank");
+  };
+
   return (
     <div
       className={`vf-card border-l-4 ${cfg.border} cursor-pointer transition-all duration-200 hover:shadow-[var(--shadow-card-hover)]`}
@@ -117,8 +128,21 @@ const CandidateCard = ({ candidate }: { candidate: CandidateData }) => {
                         <span className={statusConfig[doc.status].badge}>{statusConfig[doc.status].label}</span>
                       </div>
                     </div>
-                    <p className="text-xs text-muted-foreground mb-1 truncate">
-                      <Eye className="h-3 w-3 inline mr-1" />{doc.fileName}
+                    <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
+                      <Eye className="h-3 w-3 shrink-0" />
+                      <span className="truncate">{doc.fileName}</span>
+                      {doc.filePath && (
+                        <button
+                          className="ml-auto shrink-0 text-xs font-medium text-purple hover:text-purple/80 underline flex items-center gap-0.5"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleViewDocument(doc.filePath!);
+                          }}
+                        >
+                          <ExternalLink className="h-3 w-3" />
+                          View
+                        </button>
+                      )}
                     </p>
                     {doc.summary && (
                       <p className="text-sm text-foreground mt-2">{doc.summary}</p>
