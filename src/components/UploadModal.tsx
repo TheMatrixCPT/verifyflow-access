@@ -8,6 +8,7 @@ interface UploadModalProps {
   open: boolean;
   onClose: () => void;
   onComplete: (sessionId: string) => void;
+  existingSessionId?: string;
 }
 
 const UploadModal = ({ open, onClose, onComplete }: UploadModalProps) => {
