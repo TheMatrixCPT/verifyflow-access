@@ -1,12 +1,14 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { Upload, Download, Search, Users, CheckCircle, AlertTriangle, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Header from "@/components/Header";
 import CandidateCard from "@/components/CandidateCard";
-import { useQuery } from "@tanstack/react-query";
+import UploadModal from "@/components/UploadModal";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getSession, getCandidates, getDocuments } from "@/lib/api";
 import { format } from "date-fns";
+import { toast } from "sonner";
 import type { DocumentData } from "@/components/CandidateCard";
 
 type FilterType = "all" | "pass" | "warning" | "fail";
@@ -15,6 +17,8 @@ const SessionDetail = () => {
   const { id } = useParams<{ id: string }>();
   const [searchQuery, setSearchQuery] = useState("");
   const [filter, setFilter] = useState<FilterType>("all");
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const queryClient = useQueryClient();
 
   const { data: session } = useQuery({
     queryKey: ["session", id],
@@ -70,6 +74,54 @@ const SessionDetail = () => {
     issues: candidates.filter((c) => c.status !== "pass").length,
   };
 
+  const handleDownloadReport = () => {
+    if (candidatesWithDocs.length === 0) {
+      toast.error("No data to download");
+      return;
+    }
+
+    const rows: string[][] = [
+      ["Candidate", "Status", "Score", "Document", "Doc Type", "Doc Status", "Confidence", "Issues", "Summary"],
+    ];
+
+    for (const c of candidatesWithDocs) {
+      if (c.documents.length === 0) {
+        rows.push([c.name, c.status, String(c.score), "", "", "", "", c.issues.join("; "), c.summary]);
+      } else {
+        for (const d of c.documents) {
+          rows.push([
+            c.name,
+            c.status,
+            String(c.score),
+            d.fileName,
+            d.type,
+            d.status,
+            String(d.confidence),
+            (d.issues || []).join("; "),
+            d.summary || "",
+          ]);
+        }
+      }
+    }
+
+    const csv = rows.map((r) => r.map((v) => `"${v.replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${session?.name || "report"}-${format(new Date(), "yyyy-MM-dd")}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("Report downloaded");
+  };
+
+  const handleUploadComplete = (sessionId: string) => {
+    setUploadOpen(false);
+    queryClient.invalidateQueries({ queryKey: ["session", id] });
+    queryClient.invalidateQueries({ queryKey: ["candidates", id] });
+    queryClient.invalidateQueries({ queryKey: ["documents", id] });
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <Header />
@@ -87,10 +139,18 @@ const SessionDetail = () => {
               </p>
             </div>
             <div className="flex gap-3">
-              <Button variant="outline" className="border-primary-foreground/30 text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground">
+              <Button
+                variant="secondary"
+                className="bg-primary-foreground/10 border-primary-foreground/30 text-primary-foreground hover:bg-primary-foreground/20"
+                onClick={() => setUploadOpen(true)}
+              >
                 <Upload className="h-4 w-4" /> Upload More
               </Button>
-              <Button variant="hero">
+              <Button
+                variant="secondary"
+                className="bg-accent text-accent-foreground hover:bg-accent/90"
+                onClick={handleDownloadReport}
+              >
                 <Download className="h-4 w-4" /> Download Report
               </Button>
             </div>
@@ -156,6 +216,12 @@ const SessionDetail = () => {
           </div>
         )}
       </div>
+
+      <UploadModal
+        open={uploadOpen}
+        onClose={() => setUploadOpen(false)}
+        onComplete={handleUploadComplete}
+      />
     </div>
   );
 };
