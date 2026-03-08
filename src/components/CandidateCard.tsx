@@ -17,7 +17,7 @@ export interface DocumentData {
   issues?: string[];
   checks?: DocumentCheck[];
   extractedIdNumber?: string;
-  fileUrl?: string;
+  filePath?: string;
 }
 
 export interface CandidateData {
