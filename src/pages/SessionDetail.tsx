@@ -40,22 +40,19 @@ const SessionDetail = () => {
     enabled: !!id,
   });
 
-  const candidatesWithDocs = candidates.map((c) => {
+  const candidatesWithDocs = useMemo(() => candidates.map((c) => {
     const candidateDocs = documents.filter((d) => d.candidate_id === c.id);
-    const docData: DocumentData[] = candidateDocs.map((d) => {
-      const { data: urlData } = supabase.storage.from("documents").getPublicUrl(d.file_path);
-      return {
-        type: d.document_type || "Unknown",
-        status: (d.validation_status as "pass" | "warning" | "fail") || "pass",
-        fileName: d.file_name,
-        confidence: Number(d.confidence_score) || 0,
-        summary: (d.validation_details as any)?.summary || undefined,
-        issues: d.issues && d.issues.length > 0 ? d.issues : undefined,
-        checks: (d.validation_details as any)?.checks || undefined,
-        extractedIdNumber: (d.validation_details as any)?.extracted_id_number || undefined,
-        fileUrl: urlData.publicUrl,
-      };
-    });
+    const docData: DocumentData[] = candidateDocs.map((d) => ({
+      type: d.document_type || "Unknown",
+      status: (d.validation_status as "pass" | "warning" | "fail") || "pass",
+      fileName: d.file_name,
+      filePath: d.file_path,
+      confidence: Number(d.confidence_score) || 0,
+      summary: (d.validation_details as any)?.summary || undefined,
+      issues: d.issues && d.issues.length > 0 ? d.issues : undefined,
+      checks: (d.validation_details as any)?.checks || undefined,
+      extractedIdNumber: (d.validation_details as any)?.extracted_id_number || undefined,
+    }));
 
     return {
       id: c.id,
@@ -67,7 +64,7 @@ const SessionDetail = () => {
       summary: c.summary || "No summary available",
       issues: candidateDocs.flatMap((d) => d.issues || []).filter(Boolean),
     };
-  });
+  }), [candidates, documents]);
 
   const filtered = candidatesWithDocs.filter((c) => {
     const matchesSearch = c.name.toLowerCase().includes(searchQuery.toLowerCase()) || c.idNumber.includes(searchQuery);
