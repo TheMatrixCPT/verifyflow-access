@@ -151,6 +151,42 @@ export type Database = {
         }
         Relationships: []
       }
+      settings: {
+        Row: {
+          api_key_encrypted: string | null
+          confidence_threshold: number
+          created_at: string
+          email_api_key_encrypted: string | null
+          from_email: string | null
+          id: string
+          stamp_validity_months: number
+          strict_mode: boolean
+          updated_at: string
+        }
+        Insert: {
+          api_key_encrypted?: string | null
+          confidence_threshold?: number
+          created_at?: string
+          email_api_key_encrypted?: string | null
+          from_email?: string | null
+          id?: string
+          stamp_validity_months?: number
+          strict_mode?: boolean
+          updated_at?: string
+        }
+        Update: {
+          api_key_encrypted?: string | null
+          confidence_threshold?: number
+          created_at?: string
+          email_api_key_encrypted?: string | null
+          from_email?: string | null
+          id?: string
+          stamp_validity_months?: number
+          strict_mode?: boolean
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

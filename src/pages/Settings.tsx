@@ -1,20 +1,69 @@
-import { useState } from "react";
-import { ArrowLeft, ChevronDown, ChevronUp } from "lucide-react";
+import { useState, useEffect } from "react";
+import { ArrowLeft, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import Header from "@/components/Header";
 import { toast } from "sonner";
+import { getSettings, updateSettings } from "@/lib/api";
 
 const Settings = () => {
   const [confidence, setConfidence] = useState(80);
   const [stampValidity, setStampValidity] = useState(3);
   const [strictMode, setStrictMode] = useState(false);
+  const [fromEmail, setFromEmail] = useState("");
   const [apiExpanded, setApiExpanded] = useState(false);
   const [emailExpanded, setEmailExpanded] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
-  const handleSave = () => {
-    toast.success("Settings saved successfully");
+  useEffect(() => {
+    loadSettings();
+  }, []);
+
+  const loadSettings = async () => {
+    try {
+      const settings = await getSettings();
+      if (settings) {
+        setConfidence(settings.confidence_threshold);
+        setStampValidity(settings.stamp_validity_months);
+        setStrictMode(settings.strict_mode);
+        setFromEmail(settings.from_email || "");
+      }
+    } catch (e) {
+      console.error("Failed to load settings:", e);
+    } finally {
+      setLoading(false);
+    }
   };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await updateSettings({
+        confidence_threshold: confidence,
+        stamp_validity_months: stampValidity,
+        strict_mode: strictMode,
+        from_email: fromEmail || undefined,
+      });
+      toast.success("Settings saved successfully. Changes will apply to all future validations.");
+    } catch (e) {
+      console.error("Failed to save settings:", e);
+      toast.error("Failed to save settings");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Header />
+        <div className="flex items-center justify-center py-32">
+          <Loader2 className="h-8 w-8 text-purple animate-spin" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -84,10 +133,7 @@ const Settings = () => {
 
         {/* API Configuration */}
         <div className="vf-card mb-6">
-          <button
-            className="w-full flex items-center justify-between"
-            onClick={() => setApiExpanded(!apiExpanded)}
-          >
+          <button className="w-full flex items-center justify-between" onClick={() => setApiExpanded(!apiExpanded)}>
             <h2 className="text-xl font-semibold text-space-kadet">API Configuration</h2>
             {apiExpanded ? <ChevronUp className="h-5 w-5 text-muted-foreground" /> : <ChevronDown className="h-5 w-5 text-muted-foreground" />}
           </button>
@@ -105,30 +151,36 @@ const Settings = () => {
 
         {/* Email Settings */}
         <div className="vf-card mb-8">
-          <button
-            className="w-full flex items-center justify-between"
-            onClick={() => setEmailExpanded(!emailExpanded)}
-          >
+          <button className="w-full flex items-center justify-between" onClick={() => setEmailExpanded(!emailExpanded)}>
             <h2 className="text-xl font-semibold text-space-kadet">Email Settings</h2>
             {emailExpanded ? <ChevronUp className="h-5 w-5 text-muted-foreground" /> : <ChevronDown className="h-5 w-5 text-muted-foreground" />}
           </button>
           {emailExpanded && (
             <div className="mt-6 space-y-4">
               <div>
-                <label className="vf-label">Resend API Key</label>
-                <input type="password" className="vf-input" placeholder="Enter Resend API key" />
-              </div>
-              <div>
                 <label className="vf-label">From Email</label>
-                <input type="email" className="vf-input" placeholder="noreply@yourcompany.com" />
+                <input
+                  type="email"
+                  className="vf-input"
+                  placeholder="noreply@yourcompany.com"
+                  value={fromEmail}
+                  onChange={(e) => setFromEmail(e.target.value)}
+                />
               </div>
               <Button variant="outline" size="sm">Send Test Email</Button>
             </div>
           )}
         </div>
 
-        <Button variant="default" size="lg" className="w-full" onClick={handleSave}>
-          Save Settings
+        <Button variant="default" size="lg" className="w-full" onClick={handleSave} disabled={saving}>
+          {saving ? (
+            <>
+              <Loader2 className="h-5 w-5 animate-spin" />
+              Saving...
+            </>
+          ) : (
+            "Save Settings"
+          )}
         </Button>
       </div>
     </div>
