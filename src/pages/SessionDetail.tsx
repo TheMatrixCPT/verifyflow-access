@@ -52,6 +52,7 @@ const SessionDetail = () => {
       issues: d.issues && d.issues.length > 0 ? d.issues : undefined,
       checks: (d.validation_details as any)?.checks || undefined,
       extractedIdNumber: (d.validation_details as any)?.extracted_id_number || undefined,
+      uploadedAt: d.created_at,
     }));
 
     return {
