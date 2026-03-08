@@ -6,28 +6,52 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+const toolSchema = {
+  type: "function",
+  function: {
+    name: "extract_document_info",
+    description: "Extract and validate document information",
+    parameters: {
+      type: "object",
+      properties: {
+        document_type: {
+          type: "string",
+          enum: [
+            "ID Document", "Signed Contract", "EEA1 Form", "Affidavit",
+            "Attendance Register", "Qualification", "Proof of Address",
+            "Tax Certificate", "Police Clearance", "CV/Resume",
+            "Reference Letter", "Medical Certificate", "Bank Statement",
+            "Employment Contract", "Other"
+          ],
+          description: "The type of HR document"
+        },
+        candidate_name: { type: "string", description: "Person's name or 'Unknown'" },
+        confidence: { type: "number", description: "Confidence score 0-100" },
+        validation_status: { type: "string", enum: ["pass", "warning", "fail"] },
+        checks: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              status: { type: "string", enum: ["pass", "warning", "fail"] },
+              detail: { type: "string" }
+            },
+            required: ["name", "status", "detail"]
+          }
+        },
+        issues: { type: "array", items: { type: "string" } },
+        summary: { type: "string", description: "Plain-English validation summary" },
+        extracted_id_number: { type: "string", description: "SA ID number if found" }
+      },
+      required: ["document_type", "candidate_name", "confidence", "validation_status", "checks", "issues", "summary"],
+      additionalProperties: false
+    }
+  }
+};
 
-  try {
-    const { document_id, file_url, file_name } = await req.json();
-
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
-
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
-
-    await supabase.from("documents").update({ validation_status: "processing" }).eq("id", document_id);
-
-    // Load settings
-    const { data: settings } = await supabase.from("settings").select("*").limit(1).single();
-    const confidenceThreshold = settings?.confidence_threshold || 80;
-    const stampValidityMonths = settings?.stamp_validity_months || 3;
-    const strictMode = settings?.strict_mode || false;
-
-    const systemPrompt = `You are a South African HR document validation AI for CapaCiTi / Capaciti training programme compliance.
+function buildSystemPrompt(confidenceThreshold: number, stampValidityMonths: number, strictMode: boolean): string {
+  return `You are a South African HR document validation AI for CapaCiTi / Capaciti training programme compliance.
 Your job is to validate uploaded candidate documents against strict rules. You do NOT approve candidates — you flag issues clearly so a human admin can make the final decision.
 
 GLOBAL SETTINGS:
@@ -83,7 +107,7 @@ Required checks:
 - This may be a scanned paper register with multiple candidate names
 
 ═══ OTHER DOCUMENTS ═══
-For any document that doesn't match the above types (Qualification, Proof of Address, Tax Certificate, Police Clearance, CV/Resume, Reference Letter, Medical Certificate, Bank Statement):
+For any document that doesn't match the above types:
 - Check image clarity
 - Check for signatures where expected
 - Check for dates where expected
@@ -95,93 +119,100 @@ VALIDATION OUTPUT RULES:
 - Provide a plain-English explanation of findings
 - Be specific about what failed and why
 - If analysing from filename only (no image content), note that visual checks are pending and set appropriate confidence`;
+}
 
-    const analysisPrompt = `Analyze this document and determine its type, validate it against the rules, and extract candidate information.
+async function analyzeWithOpenAI(apiKey: string, systemPrompt: string, fileUrl: string, fileName: string) {
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "gpt-4o",
+      messages: [
+        { role: "system", content: systemPrompt },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: `Analyze this document and validate it. Filename: "${fileName}"` },
+            { type: "image_url", image_url: { url: fileUrl, detail: "high" } }
+          ]
+        }
+      ],
+      tools: [toolSchema],
+      tool_choice: { type: "function", function: { name: "extract_document_info" } }
+    }),
+  });
+  return response;
+}
 
-Filename: "${file_name}"
-File URL: ${file_url}
+async function analyzeWithLovableAI(apiKey: string, systemPrompt: string, fileUrl: string, fileName: string) {
+  const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "google/gemini-2.5-flash",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: `Analyze this document and determine its type, validate it against the rules, and extract candidate information.\n\nFilename: "${fileName}"\nFile URL: ${fileUrl}\n\nRespond using the extract_document_info function. Be thorough in your validation checks.` }
+      ],
+      tools: [toolSchema],
+      tool_choice: { type: "function", function: { name: "extract_document_info" } }
+    }),
+  });
+  return response;
+}
 
-Respond using the extract_document_info function. Be thorough in your validation checks.`;
+serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
-    const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: analysisPrompt }
-        ],
-        tools: [{
-          type: "function",
-          function: {
-            name: "extract_document_info",
-            description: "Extract and validate document information",
-            parameters: {
-              type: "object",
-              properties: {
-                document_type: {
-                  type: "string",
-                  enum: [
-                    "ID Document", "Signed Contract", "EEA1 Form", "Affidavit",
-                    "Attendance Register", "Qualification", "Proof of Address",
-                    "Tax Certificate", "Police Clearance", "CV/Resume",
-                    "Reference Letter", "Medical Certificate", "Bank Statement",
-                    "Employment Contract", "Other"
-                  ],
-                  description: "The type of HR document"
-                },
-                candidate_name: {
-                  type: "string",
-                  description: "The person's name extracted from the filename or document content, or 'Unknown' if not determinable"
-                },
-                confidence: {
-                  type: "number",
-                  description: "Confidence score from 0 to 100"
-                },
-                validation_status: {
-                  type: "string",
-                  enum: ["pass", "warning", "fail"],
-                  description: "Overall validation status"
-                },
-                checks: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    properties: {
-                      name: { type: "string", description: "Name of the check performed" },
-                      status: { type: "string", enum: ["pass", "warning", "fail"] },
-                      detail: { type: "string", description: "Explanation of the check result" }
-                    },
-                    required: ["name", "status", "detail"]
-                  },
-                  description: "Individual validation checks performed on this document"
-                },
-                issues: {
-                  type: "array",
-                  items: { type: "string" },
-                  description: "List of issues found — plain English, actionable"
-                },
-                summary: {
-                  type: "string",
-                  description: "Plain-English validation summary explaining the overall result"
-                },
-                extracted_id_number: {
-                  type: "string",
-                  description: "SA ID number (13 digits) if found in the document, or null"
-                }
-              },
-              required: ["document_type", "candidate_name", "confidence", "validation_status", "checks", "issues", "summary"],
-              additionalProperties: false
-            }
-          }
-        }],
-        tool_choice: { type: "function", function: { name: "extract_document_info" } }
-      }),
-    });
+  try {
+    const { document_id, file_url, file_name } = await req.json();
+
+    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+    const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
+
+    if (!LOVABLE_API_KEY && !OPENAI_API_KEY) {
+      throw new Error("No AI API key configured. Need LOVABLE_API_KEY or OPENAI_API_KEY.");
+    }
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    await supabase.from("documents").update({ validation_status: "processing" }).eq("id", document_id);
+
+    // Load settings
+    const { data: settings } = await supabase.from("settings").select("*").limit(1).single();
+    const confidenceThreshold = settings?.confidence_threshold || 80;
+    const stampValidityMonths = settings?.stamp_validity_months || 3;
+    const strictMode = settings?.strict_mode || false;
+
+    const systemPrompt = buildSystemPrompt(confidenceThreshold, stampValidityMonths, strictMode);
+
+    let aiResponse: Response;
+    let aiProvider = "lovable";
+
+    // Try OpenAI first (better vision capabilities), fall back to Lovable AI
+    if (OPENAI_API_KEY) {
+      console.log("Using OpenAI GPT-4o Vision for document analysis");
+      aiProvider = "openai";
+      aiResponse = await analyzeWithOpenAI(OPENAI_API_KEY, systemPrompt, file_url, file_name);
+
+      // If OpenAI fails, fall back to Lovable AI
+      if (!aiResponse.ok && LOVABLE_API_KEY) {
+        console.log(`OpenAI returned ${aiResponse.status}, falling back to Lovable AI`);
+        aiProvider = "lovable";
+        aiResponse = await analyzeWithLovableAI(LOVABLE_API_KEY, systemPrompt, file_url, file_name);
+      }
+    } else {
+      console.log("Using Lovable AI for document analysis");
+      aiResponse = await analyzeWithLovableAI(LOVABLE_API_KEY!, systemPrompt, file_url, file_name);
+    }
 
     if (!aiResponse.ok) {
       const status = aiResponse.status;
@@ -196,8 +227,8 @@ Respond using the extract_document_info function. Be thorough in your validation
         });
       }
       const errText = await aiResponse.text();
-      console.error("AI error:", status, errText);
-      throw new Error(`AI gateway error: ${status}`);
+      console.error(`${aiProvider} AI error:`, status, errText);
+      throw new Error(`${aiProvider} AI error: ${status}`);
     }
 
     const aiData = await aiResponse.json();
@@ -233,6 +264,7 @@ Respond using the extract_document_info function. Be thorough in your validation
         summary: extracted.summary,
         checks: extracted.checks || [],
         extracted_id_number: extracted.extracted_id_number || null,
+        ai_provider: aiProvider,
       },
       processed_at: new Date().toISOString(),
     }).eq("id", document_id);
@@ -240,6 +272,7 @@ Respond using the extract_document_info function. Be thorough in your validation
     return new Response(JSON.stringify({
       success: true,
       document_id,
+      ai_provider: aiProvider,
       ...extracted,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
