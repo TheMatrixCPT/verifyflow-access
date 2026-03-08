@@ -158,6 +158,16 @@ async function analyzeWithOpenAI(apiKey: string, systemPrompt: string, fileUrl: 
 }
 
 async function analyzeWithLovableAI(apiKey: string, systemPrompt: string, fileUrl: string, fileName: string) {
+  // For Gemini, pass the file URL as an image_url content block for proper visual analysis
+  const userContent = isPdfFile(fileName)
+    ? [
+        { type: "text", text: `Analyze this document and determine its type, validate it against the rules, and extract candidate information.\n\nFilename: "${fileName}"\nFile URL: ${fileUrl}\n\nRespond using the extract_document_info function. Be thorough in your validation checks.` },
+      ]
+    : [
+        { type: "text", text: `Analyze this document and validate it. Filename: "${fileName}"` },
+        { type: "image_url", image_url: { url: fileUrl, detail: "high" } }
+      ];
+
   const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -168,11 +178,14 @@ async function analyzeWithLovableAI(apiKey: string, systemPrompt: string, fileUr
       model: "google/gemini-2.5-flash",
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: `Analyze this document and determine its type, validate it against the rules, and extract candidate information.\n\nFilename: "${fileName}"\nFile URL: ${fileUrl}\n\nRespond using the extract_document_info function. Be thorough in your validation checks.` }
+        { role: "user", content: userContent }
       ],
       tools: [toolSchema],
       tool_choice: { type: "function", function: { name: "extract_document_info" } }
     }),
+  });
+  return response;
+}
   });
   return response;
 }
