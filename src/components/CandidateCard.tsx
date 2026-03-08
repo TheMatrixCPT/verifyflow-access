@@ -118,8 +118,20 @@ const CandidateCard = ({ candidate }: { candidate: CandidateData }) => {
                         <span className={statusConfig[doc.status].badge}>{statusConfig[doc.status].label}</span>
                       </div>
                     </div>
-                    <p className="text-xs text-muted-foreground mb-1 truncate">
-                      <Eye className="h-3 w-3 inline mr-1" />{doc.fileName}
+                    <p className="text-xs text-muted-foreground mb-1 truncate flex items-center gap-1">
+                      <Eye className="h-3 w-3 shrink-0" />
+                      <span className="truncate">{doc.fileName}</span>
+                      {doc.fileUrl && (
+                        <a
+                          href={doc.fileUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="ml-auto shrink-0 text-xs font-medium text-purple hover:text-purple/80 underline"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          View Document
+                        </a>
+                      )}
                     </p>
                     {doc.summary && (
                       <p className="text-sm text-foreground mt-2">{doc.summary}</p>
