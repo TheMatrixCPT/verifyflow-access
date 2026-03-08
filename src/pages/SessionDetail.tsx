@@ -10,6 +10,7 @@ import { getSession, getCandidates, getDocuments } from "@/lib/api";
 import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
 import { toast } from "sonner";
+import { generateReport } from "@/lib/generateReport";
 import type { DocumentData } from "@/components/CandidateCard";
 
 type FilterType = "all" | "pass" | "warning" | "fail";
