@@ -1,7 +1,7 @@
 import { useState, useCallback } from "react";
-import { X, Upload, FileText, Loader2 } from "lucide-react";
+import { X, Upload, FileText, Loader2, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { createSession, uploadAndProcessFiles } from "@/lib/api";
+import { createSession, uploadAndProcessFiles, checkDuplicateFiles } from "@/lib/api";
 import { toast } from "sonner";
 
 interface UploadModalProps {
@@ -11,12 +11,20 @@ interface UploadModalProps {
   existingSessionId?: string;
 }
 
+interface DuplicateInfo {
+  fileName: string;
+  existingUploadedAt: string;
+}
+
 const UploadModal = ({ open, onClose, onComplete, existingSessionId }: UploadModalProps) => {
   const [sessionName, setSessionName] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState({ processed: 0, total: 0 });
+  const [duplicates, setDuplicates] = useState<DuplicateInfo[]>([]);
+  const [showDuplicateDialog, setShowDuplicateDialog] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -35,21 +43,23 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId }: UploadMod
     setFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleProcess = async () => {
-    if (files.length === 0) return;
+  const processFiles = async (filesToProcess: File[], replaceExisting: boolean) => {
     setIsProcessing(true);
-    setProgress({ processed: 0, total: files.length });
+    setShowDuplicateDialog(false);
+    setProgress({ processed: 0, total: filesToProcess.length });
 
     try {
       const sessionId = existingSessionId || await createSession(sessionName || `Session ${new Date().toLocaleDateString()}`);
 
-      await uploadAndProcessFiles(sessionId, files, (processed, total) => {
+      await uploadAndProcessFiles(sessionId, filesToProcess, (processed, total) => {
         setProgress({ processed, total });
-      });
+      }, replaceExisting);
 
-      toast.success(`Successfully processed ${files.length} documents`);
+      toast.success(`Successfully processed ${filesToProcess.length} documents`);
       setSessionName("");
       setFiles([]);
+      setPendingFiles([]);
+      setDuplicates([]);
       setIsProcessing(false);
       setProgress({ processed: 0, total: 0 });
       onComplete(sessionId);
@@ -60,34 +70,91 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId }: UploadMod
     }
   };
 
+  const handleProcess = async () => {
+    if (files.length === 0) return;
+
+    // Check for duplicates if uploading to existing session
+    if (existingSessionId) {
+      const fileNames = files.map(f => f.name);
+      const dupes = await checkDuplicateFiles(existingSessionId, fileNames);
+
+      if (dupes.length > 0) {
+        setDuplicates(dupes);
+        setPendingFiles(files);
+        setShowDuplicateDialog(true);
+        return;
+      }
+    }
+
+    await processFiles(files, false);
+  };
+
+  const handleReplace = () => {
+    processFiles(pendingFiles, true);
+  };
+
+  const handleKeepBoth = () => {
+    processFiles(pendingFiles, false);
+  };
+
   if (!open) return null;
 
   const progressPercent = progress.total > 0 ? Math.round((progress.processed / progress.total) * 100) : 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={!isProcessing ? onClose : undefined}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={!isProcessing && !showDuplicateDialog ? onClose : undefined}>
       <div className="absolute inset-0 bg-space-kadet/50 backdrop-blur-[4px]" />
       <div
         className="relative bg-card rounded-xl p-8 max-w-[700px] w-full mx-4 max-h-[90vh] overflow-y-auto"
         style={{ boxShadow: "var(--shadow-modal)" }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between pb-6 mb-6 border-b border-border">
-          <h2 className="text-2xl font-bold text-space-kadet">Upload Documents</h2>
-          {!isProcessing && (
-            <Button variant="icon" size="icon" onClick={onClose}>
-              <X className="h-5 w-5" />
-            </Button>
-          )}
-        </div>
+        {/* Duplicate Dialog */}
+        {showDuplicateDialog && (
+          <div className="space-y-6">
+            <div className="flex items-center gap-3 pb-4 border-b border-border">
+              <div className="h-10 w-10 rounded-full bg-warning/10 flex items-center justify-center">
+                <AlertTriangle className="h-5 w-5 text-warning" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-space-kadet">Duplicate Documents Found</h2>
+                <p className="text-sm text-muted-foreground">{duplicates.length} file{duplicates.length !== 1 ? "s" : ""} already exist in this session</p>
+              </div>
+            </div>
 
-        {isProcessing ? (
+            <div className="space-y-2 max-h-[300px] overflow-y-auto">
+              {duplicates.map((d, i) => (
+                <div key={i} className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg border border-border">
+                  <FileText className="h-5 w-5 text-warning shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-space-kadet truncate">{d.fileName}</p>
+                    <p className="text-xs text-muted-foreground">
+                      Already uploaded on {new Date(d.existingUploadedAt).toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex flex-col gap-3 pt-4 border-t border-border">
+              <Button variant="default" onClick={handleReplace} className="w-full">
+                Replace Existing Documents
+              </Button>
+              <Button variant="secondary" onClick={handleKeepBoth} className="w-full">
+                Keep Both Versions
+              </Button>
+              <Button variant="outline" onClick={() => { setShowDuplicateDialog(false); setPendingFiles([]); setDuplicates([]); }} className="w-full">
+                Cancel Upload
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Processing State */}
+        {isProcessing && !showDuplicateDialog && (
           <div className="py-8 text-center">
             <Loader2 className="h-12 w-12 text-purple mx-auto mb-4 animate-spin" />
-            <h3 className="text-lg font-semibold text-space-kadet mb-2">
-              Processing Documents...
-            </h3>
+            <h3 className="text-lg font-semibold text-space-kadet mb-2">Processing Documents...</h3>
             <p className="text-muted-foreground mb-6">
               AI is analyzing {progress.total} documents — extracting names and document types automatically.
             </p>
@@ -97,35 +164,32 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId }: UploadMod
                 <span className="font-semibold text-space-kadet">{progressPercent}%</span>
               </div>
               <div className="h-2 bg-muted rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-purple rounded-full transition-all duration-500 ease-in-out"
-                  style={{ width: `${progressPercent}%` }}
-                />
+                <div className="h-full bg-purple rounded-full transition-all duration-500 ease-in-out" style={{ width: `${progressPercent}%` }} />
               </div>
             </div>
           </div>
-        ) : (
+        )}
+
+        {/* Normal Upload State */}
+        {!isProcessing && !showDuplicateDialog && (
           <>
-            {/* Session Name - only for new sessions */}
+            <div className="flex items-center justify-between pb-6 mb-6 border-b border-border">
+              <h2 className="text-2xl font-bold text-space-kadet">Upload Documents</h2>
+              <Button variant="icon" size="icon" onClick={onClose}>
+                <X className="h-5 w-5" />
+              </Button>
+            </div>
+
             {!existingSessionId && (
               <div className="mb-6">
                 <label className="vf-label">Session Name (Optional)</label>
-                <input
-                  type="text"
-                  className="vf-input"
-                  placeholder="e.g., Graduate Program 2025 Batch 1"
-                  value={sessionName}
-                  onChange={(e) => setSessionName(e.target.value)}
-                />
+                <input type="text" className="vf-input" placeholder="e.g., Graduate Program 2025 Batch 1" value={sessionName} onChange={(e) => setSessionName(e.target.value)} />
               </div>
             )}
 
-            {/* Drop Zone */}
             <div
               className={`border-2 border-dashed rounded-lg min-h-[200px] flex flex-col items-center justify-center p-8 transition-all duration-200 cursor-pointer ${
-                isDragging
-                  ? "border-salmon bg-salmon/5"
-                  : "border-purple bg-purple/[0.02] hover:bg-purple/5"
+                isDragging ? "border-salmon bg-salmon/5" : "border-purple bg-purple/[0.02] hover:bg-purple/5"
               }`}
               onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
               onDragLeave={() => setIsDragging(false)}
@@ -137,17 +201,9 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId }: UploadMod
               <p className="text-muted-foreground text-sm mb-2">Or click to browse and select multiple files</p>
               <p className="text-muted-foreground text-[13px]">PDF, JPG, JPEG, PNG up to 10MB each</p>
               <p className="text-purple text-sm font-semibold mt-2">AI auto-detects document type and candidate name</p>
-              <input
-                id="file-input"
-                type="file"
-                multiple
-                accept=".pdf,.jpg,.jpeg,.png"
-                className="hidden"
-                onChange={handleFileInput}
-              />
+              <input id="file-input" type="file" multiple accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={handleFileInput} />
             </div>
 
-            {/* File Preview Grid */}
             {files.length > 0 && (
               <div className="mt-6">
                 <p className="vf-label">{files.length} file{files.length !== 1 ? "s" : ""} selected</p>
@@ -169,7 +225,6 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId }: UploadMod
               </div>
             )}
 
-            {/* Footer */}
             <div className="flex justify-end gap-3 pt-6 mt-6 border-t border-border">
               <Button variant="secondary" onClick={onClose}>Cancel</Button>
               <Button variant="default" disabled={files.length === 0} onClick={handleProcess}>

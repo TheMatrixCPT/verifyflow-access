@@ -1,6 +1,8 @@
 import { useState } from "react";
-import { ChevronDown, CheckCircle, AlertTriangle, XCircle, FileText, Eye, ExternalLink } from "lucide-react";
+import { ChevronDown, CheckCircle, AlertTriangle, XCircle, FileText, Eye, ExternalLink, Clock, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { format } from "date-fns";
+import { toast } from "sonner";
 
 export interface DocumentCheck {
   name: string;
@@ -18,6 +20,7 @@ export interface DocumentData {
   checks?: DocumentCheck[];
   extractedIdNumber?: string;
   filePath?: string;
+  uploadedAt?: string;
 }
 
 export interface CandidateData {
@@ -32,27 +35,9 @@ export interface CandidateData {
 }
 
 const statusConfig = {
-  pass: {
-    border: "border-l-success",
-    badge: "vf-badge-success",
-    label: "Pass",
-    icon: CheckCircle,
-    iconColor: "text-success",
-  },
-  warning: {
-    border: "border-l-warning",
-    badge: "vf-badge-warning",
-    label: "Warning",
-    icon: AlertTriangle,
-    iconColor: "text-warning",
-  },
-  fail: {
-    border: "border-l-error",
-    badge: "vf-badge-error",
-    label: "Fail",
-    icon: XCircle,
-    iconColor: "text-error",
-  },
+  pass: { border: "border-l-success", badge: "vf-badge-success", label: "Pass", icon: CheckCircle, iconColor: "text-success" },
+  warning: { border: "border-l-warning", badge: "vf-badge-warning", label: "Warning", icon: AlertTriangle, iconColor: "text-warning" },
+  fail: { border: "border-l-error", badge: "vf-badge-error", label: "Fail", icon: XCircle, iconColor: "text-error" },
 };
 
 const docStatusIcon = {
@@ -69,16 +54,26 @@ const checkStatusIcon = {
 
 const CandidateCard = ({ candidate }: { candidate: CandidateData }) => {
   const [expanded, setExpanded] = useState(false);
+  const [viewingDoc, setViewingDoc] = useState<string | null>(null);
   const cfg = statusConfig[candidate.status];
   const StatusIcon = cfg.icon;
 
   const handleViewDocument = async (filePath: string) => {
-    const { data, error } = await supabase.storage.from("documents").createSignedUrl(filePath, 300);
-    if (error || !data?.signedUrl) {
-      console.error("Failed to get signed URL:", error);
-      return;
+    setViewingDoc(filePath);
+    try {
+      const { data, error } = await supabase.storage.from("documents").createSignedUrl(filePath, 600);
+      if (error || !data?.signedUrl) {
+        console.error("Failed to get signed URL:", error);
+        toast.error("Could not open document. Please try again.");
+        return;
+      }
+      window.open(data.signedUrl, "_blank");
+    } catch (e) {
+      console.error("View document error:", e);
+      toast.error("Failed to open document");
+    } finally {
+      setViewingDoc(null);
     }
-    window.open(data.signedUrl, "_blank");
   };
 
   return (
@@ -109,13 +104,13 @@ const CandidateCard = ({ candidate }: { candidate: CandidateData }) => {
 
       {expanded && (
         <div className="mt-4 pt-4 border-t border-border animate-slide-down" onClick={(e) => e.stopPropagation()}>
-          {/* Documents detail list */}
           <div className="mb-4">
             <p className="text-sm font-semibold text-space-kadet mb-3">Documents</p>
             <div className="space-y-3">
               {candidate.documents.map((doc, i) => {
                 const docCfg = docStatusIcon[doc.status];
                 const DocIcon = docCfg.icon;
+                const isViewing = viewingDoc === doc.filePath;
                 return (
                   <div key={i} className={`rounded-lg border border-border p-3 ${docCfg.bg}`}>
                     <div className="flex items-start justify-between mb-1">
@@ -128,27 +123,43 @@ const CandidateCard = ({ candidate }: { candidate: CandidateData }) => {
                         <span className={statusConfig[doc.status].badge}>{statusConfig[doc.status].label}</span>
                       </div>
                     </div>
-                    <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-                      <Eye className="h-3 w-3 shrink-0" />
-                      <span className="truncate">{doc.fileName}</span>
+
+                    <div className="flex items-center justify-between mb-1">
+                      <p className="text-xs text-muted-foreground flex items-center gap-1 min-w-0">
+                        <Eye className="h-3 w-3 shrink-0" />
+                        <span className="truncate">{doc.fileName}</span>
+                      </p>
                       {doc.filePath && (
                         <button
-                          className="ml-auto shrink-0 text-xs font-medium text-purple hover:text-purple/80 underline flex items-center gap-0.5"
+                          className="shrink-0 text-xs font-medium text-purple hover:text-purple/80 underline flex items-center gap-0.5 ml-2"
+                          disabled={isViewing}
                           onClick={(e) => {
                             e.stopPropagation();
                             handleViewDocument(doc.filePath!);
                           }}
                         >
-                          <ExternalLink className="h-3 w-3" />
-                          View
+                          {isViewing ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <ExternalLink className="h-3 w-3" />
+                          )}
+                          {isViewing ? "Opening..." : "View"}
                         </button>
                       )}
-                    </p>
+                    </div>
+
+                    {/* Upload timestamp */}
+                    {doc.uploadedAt && (
+                      <p className="text-[11px] text-muted-foreground flex items-center gap-1 mb-1">
+                        <Clock className="h-3 w-3 shrink-0" />
+                        Uploaded {format(new Date(doc.uploadedAt), "dd MMM yyyy 'at' HH:mm")}
+                      </p>
+                    )}
+
                     {doc.summary && (
                       <p className="text-sm text-foreground mt-2">{doc.summary}</p>
                     )}
 
-                    {/* Individual Validation Checks */}
                     {doc.checks && doc.checks.length > 0 && (
                       <div className="mt-3 bg-card rounded-md border border-border overflow-hidden">
                         <p className="text-xs font-semibold text-space-kadet px-3 py-1.5 bg-muted border-b border-border">
@@ -172,7 +183,6 @@ const CandidateCard = ({ candidate }: { candidate: CandidateData }) => {
                       </div>
                     )}
 
-                    {/* Extracted ID number */}
                     {doc.extractedIdNumber && (
                       <p className="text-xs text-muted-foreground mt-2">
                         <span className="font-medium text-space-kadet">Extracted ID:</span> {doc.extractedIdNumber}
@@ -195,7 +205,6 @@ const CandidateCard = ({ candidate }: { candidate: CandidateData }) => {
             </div>
           </div>
 
-          {/* Overall Summary */}
           <div className="bg-muted rounded-md p-3">
             <div className="flex items-start gap-2">
               <StatusIcon className={`h-5 w-5 mt-0.5 ${cfg.iconColor}`} />
@@ -206,7 +215,6 @@ const CandidateCard = ({ candidate }: { candidate: CandidateData }) => {
             </div>
           </div>
 
-          {/* All issues consolidated */}
           {candidate.issues && candidate.issues.length > 0 && (
             <div className="mt-3 bg-error/5 border border-error/20 rounded-md p-3">
               <p className="text-sm font-semibold text-error mb-2 flex items-center gap-1.5">

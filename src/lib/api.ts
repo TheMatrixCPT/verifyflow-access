@@ -10,9 +10,51 @@ export async function createSession(name: string): Promise<string> {
   return data.id;
 }
 
-export async function uploadAndProcessFiles(sessionId: string, files: File[], onProgress: (processed: number, total: number) => void) {
+export async function checkDuplicateFiles(sessionId: string, fileNames: string[]): Promise<{ fileName: string; existingUploadedAt: string }[]> {
+  const { data: existingDocs } = await supabase
+    .from("documents")
+    .select("file_name, created_at")
+    .eq("session_id", sessionId);
+
+  if (!existingDocs) return [];
+
+  const duplicates: { fileName: string; existingUploadedAt: string }[] = [];
+  for (const fileName of fileNames) {
+    const existing = existingDocs.find(d => d.file_name === fileName);
+    if (existing) {
+      duplicates.push({ fileName, existingUploadedAt: existing.created_at });
+    }
+  }
+  return duplicates;
+}
+
+export async function uploadAndProcessFiles(
+  sessionId: string,
+  files: File[],
+  onProgress: (processed: number, total: number) => void,
+  replaceExisting: boolean = false
+) {
   const total = files.length;
   await supabase.from("sessions").update({ total_documents: total, status: "processing" }).eq("id", sessionId);
+
+  // If replacing, delete existing documents with same names
+  if (replaceExisting) {
+    const fileNames = files.map(f => f.name);
+    const { data: existingDocs } = await supabase
+      .from("documents")
+      .select("id, file_path, file_name")
+      .eq("session_id", sessionId)
+      .in("file_name", fileNames);
+
+    if (existingDocs && existingDocs.length > 0) {
+      // Delete storage files
+      await supabase.storage.from("documents").remove(existingDocs.map(d => d.file_path));
+      // Delete document records
+      for (const doc of existingDocs) {
+        await supabase.from("documents").delete().eq("id", doc.id);
+      }
+    }
+  }
 
   const BATCH_SIZE = 5;
   const documentRecords: { id: string; fileName: string; filePath: string; fileSize: number }[] = [];
@@ -47,11 +89,19 @@ export async function uploadAndProcessFiles(sessionId: string, files: File[], on
     const batch = documentRecords.slice(i, i + BATCH_SIZE);
     const processing = batch.map(async (doc) => {
       try {
-        const { data: urlData } = supabase.storage.from("documents").getPublicUrl(doc.filePath);
+        // Generate a signed URL for the AI to access the private file
+        const { data: signedData } = await supabase.storage.from("documents").createSignedUrl(doc.filePath, 600);
+        const fileUrl = signedData?.signedUrl;
+
+        if (!fileUrl) {
+          console.error("Could not generate signed URL for", doc.fileName);
+          return null;
+        }
+
         const { data, error } = await supabase.functions.invoke("process-document", {
           body: {
             document_id: doc.id,
-            file_url: urlData.publicUrl,
+            file_url: fileUrl,
             file_name: doc.fileName,
           },
         });
@@ -75,6 +125,11 @@ export async function uploadAndProcessFiles(sessionId: string, files: File[], on
     .eq("session_id", sessionId);
 
   if (docs) {
+    // Delete existing candidates for this session if replacing
+    if (replaceExisting) {
+      await supabase.from("candidates").delete().eq("session_id", sessionId);
+    }
+
     const candidateMap = new Map<string, typeof docs>();
     for (const doc of docs) {
       const name = doc.candidate_name_extracted || "Unknown";
@@ -92,21 +147,42 @@ export async function uploadAndProcessFiles(sessionId: string, files: File[], on
 
       const allIssues = candidateDocs.flatMap((d) => d.issues || []);
 
-      const { data: candidate } = await supabase
+      // Check if candidate already exists (for keep-both scenario)
+      const { data: existingCandidate } = await supabase
         .from("candidates")
-        .insert({
-          session_id: sessionId,
-          name,
+        .select("id")
+        .eq("session_id", sessionId)
+        .eq("name", name)
+        .maybeSingle();
+
+      if (existingCandidate) {
+        // Update existing candidate
+        await supabase.from("candidates").update({
           score: avgScore,
           status,
           summary: `${candidateDocs.length} document(s) processed. ${hasFailure ? "Some documents failed validation." : hasWarning ? "Some documents have warnings." : "All documents passed."}${allIssues.length > 0 ? " Issues: " + allIssues.join("; ") : ""}`,
-        })
-        .select("id")
-        .single();
+        }).eq("id", existingCandidate.id);
 
-      if (candidate) {
         for (const doc of candidateDocs) {
-          await supabase.from("documents").update({ candidate_id: candidate.id }).eq("id", doc.id);
+          await supabase.from("documents").update({ candidate_id: existingCandidate.id }).eq("id", doc.id);
+        }
+      } else {
+        const { data: candidate } = await supabase
+          .from("candidates")
+          .insert({
+            session_id: sessionId,
+            name,
+            score: avgScore,
+            status,
+            summary: `${candidateDocs.length} document(s) processed. ${hasFailure ? "Some documents failed validation." : hasWarning ? "Some documents have warnings." : "All documents passed."}${allIssues.length > 0 ? " Issues: " + allIssues.join("; ") : ""}`,
+          })
+          .select("id")
+          .single();
+
+        if (candidate) {
+          for (const doc of candidateDocs) {
+            await supabase.from("documents").update({ candidate_id: candidate.id }).eq("id", doc.id);
+          }
         }
       }
     }
@@ -117,10 +193,12 @@ export async function uploadAndProcessFiles(sessionId: string, files: File[], on
     .select("validation_status")
     .eq("session_id", sessionId);
 
+  const totalDocs = finalDocs?.length || total;
   const hasIssues = finalDocs?.some((d) => d.validation_status === "fail" || d.validation_status === "warning");
   await supabase.from("sessions").update({
     status: hasIssues ? "has-issues" : "complete",
-    processed_documents: total,
+    processed_documents: totalDocs,
+    total_documents: totalDocs,
   }).eq("id", sessionId);
 
   return sessionId;
@@ -189,7 +267,6 @@ export async function updateSettings(settings: {
   strict_mode: boolean;
   from_email?: string;
 }) {
-  // Get the single settings row
   const { data: existing } = await supabase.from("settings").select("id").limit(1).single();
   if (!existing) throw new Error("No settings found");
 
