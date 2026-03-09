@@ -4,6 +4,7 @@ import { Upload, Download, Search, Users, CheckCircle, AlertTriangle, ArrowLeft 
 import { Button } from "@/components/ui/button";
 import Header from "@/components/Header";
 import CandidateCard from "@/components/CandidateCard";
+import CandidateModal from "@/components/CandidateModal";
 import UploadModal from "@/components/UploadModal";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getSession, getCandidates, getDocuments } from "@/lib/api";
@@ -11,7 +12,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { generateReport } from "@/lib/generateReport";
-import type { DocumentData } from "@/components/CandidateCard";
+import type { DocumentData, CandidateData } from "@/components/CandidateCard";
 
 type FilterType = "all" | "pass" | "warning" | "fail";
 
