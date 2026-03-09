@@ -16,6 +16,13 @@ const Settings = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  // API key state
+  const [openaiKey, setOpenaiKey] = useState("");
+  const [falKey, setFalKey] = useState("");
+  const [googleVisionKey, setGoogleVisionKey] = useState("");
+  const [awsTextractKey, setAwsTextractKey] = useState("");
+  const [apiKeysConfigured, setApiKeysConfigured] = useState<Record<string, boolean>>({});
+
   useEffect(() => {
     loadSettings();
   }, []);
