@@ -203,26 +203,38 @@ const Settings = () => {
 
                 <div className="space-y-4">
                   <div>
-                    <label className="vf-label">OpenAI API Key</label>
-                    <input type="password" className="vf-input" placeholder="sk-..." />
+                    <div className="flex items-center gap-2 mb-1">
+                      <label className="vf-label mb-0">OpenAI API Key</label>
+                      {apiKeysConfigured.openai && <span className="flex items-center gap-1 text-xs text-success"><Check className="h-3 w-3" /> Configured</span>}
+                    </div>
+                    <input type="password" className="vf-input" placeholder={apiKeysConfigured.openai ? "••••••••••••" : "sk-..."} value={openaiKey} onChange={(e) => setOpenaiKey(e.target.value)} />
                     <p className="vf-helper">GPT-4o Vision for enhanced image analysis and document understanding</p>
                   </div>
 
                   <div>
-                    <label className="vf-label">Fal.ai API Key</label>
-                    <input type="password" className="vf-input" placeholder="fal-..." />
+                    <div className="flex items-center gap-2 mb-1">
+                      <label className="vf-label mb-0">Fal.ai API Key</label>
+                      {apiKeysConfigured.fal && <span className="flex items-center gap-1 text-xs text-success"><Check className="h-3 w-3" /> Configured</span>}
+                    </div>
+                    <input type="password" className="vf-input" placeholder={apiKeysConfigured.fal ? "••••••••••••" : "fal-..."} value={falKey} onChange={(e) => setFalKey(e.target.value)} />
                     <p className="vf-helper">Fast image processing, OCR, and visual document extraction</p>
                   </div>
 
                   <div>
-                    <label className="vf-label">Google Cloud Vision API Key</label>
-                    <input type="password" className="vf-input" placeholder="AIza..." />
+                    <div className="flex items-center gap-2 mb-1">
+                      <label className="vf-label mb-0">Google Cloud Vision API Key</label>
+                      {apiKeysConfigured.google_vision && <span className="flex items-center gap-1 text-xs text-success"><Check className="h-3 w-3" /> Configured</span>}
+                    </div>
+                    <input type="password" className="vf-input" placeholder={apiKeysConfigured.google_vision ? "••••••••••••" : "AIza-..."} value={googleVisionKey} onChange={(e) => setGoogleVisionKey(e.target.value)} />
                     <p className="vf-helper">Advanced OCR, handwriting recognition, and stamp/seal detection</p>
                   </div>
 
                   <div>
-                    <label className="vf-label">AWS Textract Access Key</label>
-                    <input type="password" className="vf-input" placeholder="AKIA..." />
+                    <div className="flex items-center gap-2 mb-1">
+                      <label className="vf-label mb-0">AWS Textract Access Key</label>
+                      {apiKeysConfigured.aws_textract && <span className="flex items-center gap-1 text-xs text-success"><Check className="h-3 w-3" /> Configured</span>}
+                    </div>
+                    <input type="password" className="vf-input" placeholder={apiKeysConfigured.aws_textract ? "••••••••••••" : "AKIA..."} value={awsTextractKey} onChange={(e) => setAwsTextractKey(e.target.value)} />
                     <p className="vf-helper">Table extraction, form parsing, and structured data extraction from documents</p>
                   </div>
                 </div>
