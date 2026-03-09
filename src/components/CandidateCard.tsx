@@ -156,10 +156,21 @@ const DocumentItem = ({ doc, index }: { doc: DocumentData; index: number }) => {
             </div>
           )}
 
-          {doc.extractedIdNumber && (
-            <p className="text-xs text-muted-foreground mt-2">
-              <span className="font-medium text-space-kadet">Extracted ID:</span> {doc.extractedIdNumber}
-            </p>
+          {(doc.extractedIdNumber || doc.stampDate || doc.policeStation || doc.certificationAuthority) && (
+            <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+              {doc.extractedIdNumber && (
+                <p><span className="font-medium text-space-kadet">Extracted ID:</span> {doc.extractedIdNumber}</p>
+              )}
+              {doc.stampDate && (
+                <p><span className="font-medium text-space-kadet">Stamp Date:</span> {doc.stampDate}</p>
+              )}
+              {doc.policeStation && (
+                <p><span className="font-medium text-space-kadet">Police Station:</span> {doc.policeStation}</p>
+              )}
+              {doc.certificationAuthority && (
+                <p><span className="font-medium text-space-kadet">Certified By:</span> {doc.certificationAuthority}</p>
+              )}
+            </div>
           )}
 
           {doc.issues && doc.issues.length > 0 && (
