@@ -4,6 +4,7 @@ import { Upload, Download, Search, Users, CheckCircle, AlertTriangle, ArrowLeft 
 import { Button } from "@/components/ui/button";
 import Header from "@/components/Header";
 import CandidateCard from "@/components/CandidateCard";
+import CandidateModal from "@/components/CandidateModal";
 import UploadModal from "@/components/UploadModal";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getSession, getCandidates, getDocuments } from "@/lib/api";
@@ -11,7 +12,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { generateReport } from "@/lib/generateReport";
-import type { DocumentData } from "@/components/CandidateCard";
+import type { DocumentData, CandidateData } from "@/components/CandidateCard";
 
 type FilterType = "all" | "pass" | "warning" | "fail";
 
@@ -20,6 +21,7 @@ const SessionDetail = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [filter, setFilter] = useState<FilterType>("all");
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [selectedCandidate, setSelectedCandidate] = useState<CandidateData | null>(null);
   const queryClient = useQueryClient();
 
   const { data: session } = useQuery({
@@ -54,8 +56,10 @@ const SessionDetail = () => {
       extractedIdNumber: (d.validation_details as any)?.extracted_id_number || undefined,
       uploadedAt: d.created_at,
       stampDate: (d.validation_details as any)?.stamp_date || undefined,
+      stampDateValid: (d.validation_details as any)?.stamp_date_valid ?? null,
       policeStation: (d.validation_details as any)?.police_station || undefined,
       certificationAuthority: (d.validation_details as any)?.certification_authority || undefined,
+      extractedInfo: (d.validation_details as any)?.extracted_info || undefined,
     }));
 
     return {
@@ -183,7 +187,7 @@ const SessionDetail = () => {
         {filtered.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-start">
             {filtered.map((candidate) => (
-              <CandidateCard key={candidate.id} candidate={candidate} />
+              <CandidateCard key={candidate.id} candidate={candidate} onClick={() => setSelectedCandidate(candidate)} />
             ))}
           </div>
         ) : candidates.length === 0 ? (
@@ -206,6 +210,12 @@ const SessionDetail = () => {
         onClose={() => setUploadOpen(false)}
         onComplete={handleUploadComplete}
         existingSessionId={id}
+      />
+
+      <CandidateModal
+        candidate={selectedCandidate}
+        open={!!selectedCandidate}
+        onClose={() => setSelectedCandidate(null)}
       />
     </div>
   );

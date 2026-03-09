@@ -10,7 +10,7 @@ const toolSchema = {
   type: "function",
   function: {
     name: "extract_document_info",
-    description: "Extract and validate document information",
+    description: "Extract and validate document information, including all readable content",
     parameters: {
       type: "object",
       properties: {
@@ -25,7 +25,7 @@ const toolSchema = {
           ],
           description: "The type of HR document"
         },
-        candidate_name: { type: "string", description: "Person's name or 'Unknown'" },
+        candidate_name: { type: "string", description: "Person's full name or 'Unknown'" },
         confidence: { type: "number", description: "Confidence score 0-100" },
         validation_status: { type: "string", enum: ["pass", "warning", "fail"] },
         checks: {
@@ -42,12 +42,36 @@ const toolSchema = {
         },
         issues: { type: "array", items: { type: "string" } },
         summary: { type: "string", description: "Plain-English validation summary" },
-        extracted_id_number: { type: "string", description: "SA ID number if found" },
-        stamp_date: { type: "string", description: "Date on certification stamp if found (ISO format or text)" },
+        extracted_id_number: { type: "string", description: "SA ID number if found (13 digits)" },
+        stamp_date: { type: "string", description: "Date on certification stamp if found (ISO format YYYY-MM-DD)" },
+        stamp_date_valid: { type: "boolean", description: "Whether the stamp date is within the configured validity period" },
         police_station: { type: "string", description: "Police station name if found on stamp or document" },
         certification_authority: { type: "string", description: "Commissioner of Oaths or Police station that certified the document" },
+        extracted_info: {
+          type: "object",
+          description: "All extracted information from the document",
+          properties: {
+            full_name: { type: "string", description: "Full name of person on document" },
+            id_number: { type: "string", description: "ID number if present" },
+            date_of_birth: { type: "string", description: "Date of birth if present" },
+            gender: { type: "string", description: "Gender if present" },
+            nationality: { type: "string", description: "Nationality or citizenship status" },
+            address: { type: "string", description: "Physical address if present" },
+            phone_number: { type: "string", description: "Phone number if present" },
+            email: { type: "string", description: "Email address if present" },
+            employer: { type: "string", description: "Employer name if present" },
+            job_title: { type: "string", description: "Job title or position if present" },
+            qualification_name: { type: "string", description: "Qualification/certificate name if applicable" },
+            institution: { type: "string", description: "Educational institution if applicable" },
+            issue_date: { type: "string", description: "Document issue date" },
+            expiry_date: { type: "string", description: "Document expiry date if present" },
+            reference_number: { type: "string", description: "Reference or document number" },
+            signature_present: { type: "boolean", description: "Whether a signature is present" },
+            additional_notes: { type: "string", description: "Any other extracted text or notable information" }
+          }
+        }
       },
-      required: ["document_type", "candidate_name", "confidence", "validation_status", "checks", "issues", "summary"],
+      required: ["document_type", "candidate_name", "confidence", "validation_status", "checks", "issues", "summary", "extracted_info"],
       additionalProperties: false
     }
   }
@@ -147,6 +171,21 @@ For any document that doesn't match the above types:
 - Check for stamps and certification marks
 - If stamped: identify police station or commissioner
 - Extract any ID numbers present
+
+INFORMATION EXTRACTION RULES:
+- You MUST extract ALL readable information from the document into the extracted_info object
+- Extract names, ID numbers, dates, addresses, phone numbers, emails, reference numbers — everything visible
+- For ID documents: extract full name, ID number, date of birth, gender, nationality
+- For contracts: extract employer name, job title, signature status, dates
+- For qualifications: extract institution name, qualification title, date of issue
+- For police clearance: extract SAPS reference number, station name, issue date
+- For proof of address: extract full address, account holder name, date
+- Leave fields empty string if not found — do not make up information
+
+STAMP DATE VALIDITY:
+- When a stamp date is found, calculate whether it is within ${stampValidityMonths} months from today (${today})
+- Set stamp_date_valid to true if within period, false if expired
+- If stamp is expired, add this as a FAIL check and include in issues
 
 VALIDATION OUTPUT RULES:
 - For each check performed, include it in the "checks" array with name, status (pass/warning/fail), and detail
@@ -302,8 +341,10 @@ serve(async (req) => {
       summary: "Could not fully analyze document",
       extracted_id_number: null as string | null,
       stamp_date: null as string | null,
+      stamp_date_valid: null as boolean | null,
       police_station: null as string | null,
       certification_authority: null as string | null,
+      extracted_info: null as Record<string, any> | null,
     };
 
     if (toolCall?.function?.arguments) {
@@ -326,8 +367,10 @@ serve(async (req) => {
         checks: extracted.checks || [],
         extracted_id_number: extracted.extracted_id_number || null,
         stamp_date: extracted.stamp_date || null,
+        stamp_date_valid: extracted.stamp_date_valid ?? null,
         police_station: extracted.police_station || null,
         certification_authority: extracted.certification_authority || null,
+        extracted_info: extracted.extracted_info || null,
         ai_provider: aiProvider,
       },
       processed_at: new Date().toISOString(),
