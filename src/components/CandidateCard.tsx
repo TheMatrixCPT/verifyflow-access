@@ -22,8 +22,10 @@ export interface DocumentData {
   filePath?: string;
   uploadedAt?: string;
   stampDate?: string;
+  stampDateValid?: boolean | null;
   policeStation?: string;
   certificationAuthority?: string;
+  extractedInfo?: Record<string, any>;
 }
 
 export interface CandidateData {
