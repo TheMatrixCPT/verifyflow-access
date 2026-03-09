@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
-import { ArrowLeft, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronUp, Loader2, Check } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import Header from "@/components/Header";
 import { toast } from "sonner";
 import { getSettings, updateSettings } from "@/lib/api";
+import { supabase } from "@/integrations/supabase/client";
 
 const Settings = () => {
   const [confidence, setConfidence] = useState(80);
@@ -16,18 +17,31 @@ const Settings = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  // API key state
+  const [openaiKey, setOpenaiKey] = useState("");
+  const [falKey, setFalKey] = useState("");
+  const [googleVisionKey, setGoogleVisionKey] = useState("");
+  const [awsTextractKey, setAwsTextractKey] = useState("");
+  const [apiKeysConfigured, setApiKeysConfigured] = useState<Record<string, boolean>>({});
+
   useEffect(() => {
     loadSettings();
   }, []);
 
   const loadSettings = async () => {
     try {
-      const settings = await getSettings();
+      const [settings, apiKeysResult] = await Promise.all([
+        getSettings(),
+        supabase.functions.invoke("manage-api-keys", { method: "GET" }),
+      ]);
       if (settings) {
         setConfidence(settings.confidence_threshold);
         setStampValidity(settings.stamp_validity_months);
         setStrictMode(settings.strict_mode);
         setFromEmail(settings.from_email || "");
+      }
+      if (apiKeysResult.data?.apiKeys) {
+        setApiKeysConfigured(apiKeysResult.data.apiKeys);
       }
     } catch (e) {
       console.error("Failed to load settings:", e);
@@ -39,12 +53,48 @@ const Settings = () => {
   const handleSave = async () => {
     setSaving(true);
     try {
-      await updateSettings({
-        confidence_threshold: confidence,
-        stamp_validity_months: stampValidity,
-        strict_mode: strictMode,
-        from_email: fromEmail || undefined,
-      });
+      // Save general settings and API keys in parallel
+      const apiKeysPayload: Record<string, string> = {};
+      if (openaiKey) apiKeysPayload.openai = openaiKey;
+      if (falKey) apiKeysPayload.fal = falKey;
+      if (googleVisionKey) apiKeysPayload.google_vision = googleVisionKey;
+      if (awsTextractKey) apiKeysPayload.aws_textract = awsTextractKey;
+
+      const promises: Promise<any>[] = [
+        updateSettings({
+          confidence_threshold: confidence,
+          stamp_validity_months: stampValidity,
+          strict_mode: strictMode,
+          from_email: fromEmail || undefined,
+        }),
+      ];
+
+      if (Object.keys(apiKeysPayload).length > 0) {
+        promises.push(
+          supabase.functions.invoke("manage-api-keys", {
+            method: "POST",
+            body: apiKeysPayload,
+          })
+        );
+      }
+
+      await Promise.all(promises);
+
+      // Update configured status and clear inputs
+      if (Object.keys(apiKeysPayload).length > 0) {
+        setApiKeysConfigured(prev => ({
+          ...prev,
+          ...(openaiKey ? { openai: true } : {}),
+          ...(falKey ? { fal: true } : {}),
+          ...(googleVisionKey ? { google_vision: true } : {}),
+          ...(awsTextractKey ? { aws_textract: true } : {}),
+        }));
+        setOpenaiKey("");
+        setFalKey("");
+        setGoogleVisionKey("");
+        setAwsTextractKey("");
+      }
+
       toast.success("Settings saved successfully. Changes will apply to all future validations.");
     } catch (e) {
       console.error("Failed to save settings:", e);
@@ -153,26 +203,38 @@ const Settings = () => {
 
                 <div className="space-y-4">
                   <div>
-                    <label className="vf-label">OpenAI API Key</label>
-                    <input type="password" className="vf-input" placeholder="sk-..." />
+                    <div className="flex items-center gap-2 mb-1">
+                      <label className="vf-label mb-0">OpenAI API Key</label>
+                      {apiKeysConfigured.openai && <span className="flex items-center gap-1 text-xs text-success"><Check className="h-3 w-3" /> Configured</span>}
+                    </div>
+                    <input type="password" className="vf-input" placeholder={apiKeysConfigured.openai ? "••••••••••••" : "sk-..."} value={openaiKey} onChange={(e) => setOpenaiKey(e.target.value)} />
                     <p className="vf-helper">GPT-4o Vision for enhanced image analysis and document understanding</p>
                   </div>
 
                   <div>
-                    <label className="vf-label">Fal.ai API Key</label>
-                    <input type="password" className="vf-input" placeholder="fal-..." />
+                    <div className="flex items-center gap-2 mb-1">
+                      <label className="vf-label mb-0">Fal.ai API Key</label>
+                      {apiKeysConfigured.fal && <span className="flex items-center gap-1 text-xs text-success"><Check className="h-3 w-3" /> Configured</span>}
+                    </div>
+                    <input type="password" className="vf-input" placeholder={apiKeysConfigured.fal ? "••••••••••••" : "fal-..."} value={falKey} onChange={(e) => setFalKey(e.target.value)} />
                     <p className="vf-helper">Fast image processing, OCR, and visual document extraction</p>
                   </div>
 
                   <div>
-                    <label className="vf-label">Google Cloud Vision API Key</label>
-                    <input type="password" className="vf-input" placeholder="AIza..." />
+                    <div className="flex items-center gap-2 mb-1">
+                      <label className="vf-label mb-0">Google Cloud Vision API Key</label>
+                      {apiKeysConfigured.google_vision && <span className="flex items-center gap-1 text-xs text-success"><Check className="h-3 w-3" /> Configured</span>}
+                    </div>
+                    <input type="password" className="vf-input" placeholder={apiKeysConfigured.google_vision ? "••••••••••••" : "AIza-..."} value={googleVisionKey} onChange={(e) => setGoogleVisionKey(e.target.value)} />
                     <p className="vf-helper">Advanced OCR, handwriting recognition, and stamp/seal detection</p>
                   </div>
 
                   <div>
-                    <label className="vf-label">AWS Textract Access Key</label>
-                    <input type="password" className="vf-input" placeholder="AKIA..." />
+                    <div className="flex items-center gap-2 mb-1">
+                      <label className="vf-label mb-0">AWS Textract Access Key</label>
+                      {apiKeysConfigured.aws_textract && <span className="flex items-center gap-1 text-xs text-success"><Check className="h-3 w-3" /> Configured</span>}
+                    </div>
+                    <input type="password" className="vf-input" placeholder={apiKeysConfigured.aws_textract ? "••••••••••••" : "AKIA..."} value={awsTextractKey} onChange={(e) => setAwsTextractKey(e.target.value)} />
                     <p className="vf-helper">Table extraction, form parsing, and structured data extraction from documents</p>
                   </div>
                 </div>
