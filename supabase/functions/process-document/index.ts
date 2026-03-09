@@ -172,6 +172,21 @@ For any document that doesn't match the above types:
 - If stamped: identify police station or commissioner
 - Extract any ID numbers present
 
+INFORMATION EXTRACTION RULES:
+- You MUST extract ALL readable information from the document into the extracted_info object
+- Extract names, ID numbers, dates, addresses, phone numbers, emails, reference numbers — everything visible
+- For ID documents: extract full name, ID number, date of birth, gender, nationality
+- For contracts: extract employer name, job title, signature status, dates
+- For qualifications: extract institution name, qualification title, date of issue
+- For police clearance: extract SAPS reference number, station name, issue date
+- For proof of address: extract full address, account holder name, date
+- Leave fields empty string if not found — do not make up information
+
+STAMP DATE VALIDITY:
+- When a stamp date is found, calculate whether it is within ${stampValidityMonths} months from today (${today})
+- Set stamp_date_valid to true if within period, false if expired
+- If stamp is expired, add this as a FAIL check and include in issues
+
 VALIDATION OUTPUT RULES:
 - For each check performed, include it in the "checks" array with name, status (pass/warning/fail), and detail
 - Overall status: "fail" if ANY critical check fails, "warning" if non-critical issues exist, "pass" if all checks pass
