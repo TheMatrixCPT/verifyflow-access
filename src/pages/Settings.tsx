@@ -30,12 +30,18 @@ const Settings = () => {
 
   const loadSettings = async () => {
     try {
-      const settings = await getSettings();
+      const [settings, apiKeysResult] = await Promise.all([
+        getSettings(),
+        supabase.functions.invoke("manage-api-keys", { method: "GET" }),
+      ]);
       if (settings) {
         setConfidence(settings.confidence_threshold);
         setStampValidity(settings.stamp_validity_months);
         setStrictMode(settings.strict_mode);
         setFromEmail(settings.from_email || "");
+      }
+      if (apiKeysResult.data?.apiKeys) {
+        setApiKeysConfigured(apiKeysResult.data.apiKeys);
       }
     } catch (e) {
       console.error("Failed to load settings:", e);
