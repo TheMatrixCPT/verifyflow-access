@@ -21,6 +21,9 @@ export interface DocumentData {
   extractedIdNumber?: string;
   filePath?: string;
   uploadedAt?: string;
+  stampDate?: string;
+  policeStation?: string;
+  certificationAuthority?: string;
 }
 
 export interface CandidateData {
