@@ -53,6 +53,9 @@ const SessionDetail = () => {
       checks: (d.validation_details as any)?.checks || undefined,
       extractedIdNumber: (d.validation_details as any)?.extracted_id_number || undefined,
       uploadedAt: d.created_at,
+      stampDate: (d.validation_details as any)?.stamp_date || undefined,
+      policeStation: (d.validation_details as any)?.police_station || undefined,
+      certificationAuthority: (d.validation_details as any)?.certification_authority || undefined,
     }));
 
     return {

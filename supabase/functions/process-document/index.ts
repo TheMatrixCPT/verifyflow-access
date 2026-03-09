@@ -42,7 +42,10 @@ const toolSchema = {
         },
         issues: { type: "array", items: { type: "string" } },
         summary: { type: "string", description: "Plain-English validation summary" },
-        extracted_id_number: { type: "string", description: "SA ID number if found" }
+        extracted_id_number: { type: "string", description: "SA ID number if found" },
+        stamp_date: { type: "string", description: "Date on certification stamp if found (ISO format or text)" },
+        police_station: { type: "string", description: "Police station name if found on stamp or document" },
+        certification_authority: { type: "string", description: "Commissioner of Oaths or Police station that certified the document" },
       },
       required: ["document_type", "candidate_name", "confidence", "validation_status", "checks", "issues", "summary"],
       additionalProperties: false
@@ -51,8 +54,11 @@ const toolSchema = {
 };
 
 function buildSystemPrompt(confidenceThreshold: number, stampValidityMonths: number, strictMode: boolean): string {
+  const today = new Date().toISOString().split("T")[0];
   return `You are a South African HR document validation AI for CapaCiTi / Capaciti training programme compliance.
 Your job is to validate uploaded candidate documents against strict rules. You do NOT approve candidates — you flag issues clearly so a human admin can make the final decision.
+
+TODAY'S DATE: ${today}
 
 GLOBAL SETTINGS:
 - Minimum confidence to pass: ${confidenceThreshold}%
@@ -67,10 +73,14 @@ Required checks (each must be reported as pass/fail):
 - Full document visible: No clipping or cut-off edges
 - ID number readable: Can the SA ID number (13 digits) be extracted?
 - Certification stamp present: Is there a commissioner of oaths / police stamp?
-- Stamp authority: Is it stamped by Police or Commissioner of Oaths?
-- Stamp date validity: Is the stamp date ≤ ${stampValidityMonths} months old from today?
+- Stamp authority: Identify WHO stamped it — is it a Police Station (name the station) or Commissioner of Oaths? Report the police station name or commissioner details.
+- Stamp date present: Can you read a date on the stamp?
+- Stamp date validity: Is the stamp date ≤ ${stampValidityMonths} months old from today (${today})? Calculate the difference.
+- Is Certified: Does the document bear a "certified true copy" notation or equivalent certification mark?
+- Commissioner signature: Is there a signature next to the stamp?
 - Document may be skewed/folded (photo from camera on uneven surface) — still must be readable
 - The stamp may be faint — the critical parts are: date of validation + commissioner's signature next to stamp
+- IMPORTANT: Extract and report the stamp date, police station name, and certification authority in dedicated fields.
 
 ═══ 2. SIGNED CONTRACT ═══
 Required checks:
@@ -96,6 +106,8 @@ Required checks:
 - Document is dated
 - ID number is present
 - ID number matches the candidate's ID document
+- Commissioner of Oaths stamp present — identify the police station or commissioner
+- Stamp date present and valid (within ${stampValidityMonths} months)
 - Follows standard Capaciti affidavit format
 
 ═══ 5. ATTENDANCE / TRAINING REGISTER ═══
@@ -106,11 +118,34 @@ Required checks:
 - Date present and valid
 - This may be a scanned paper register with multiple candidate names
 
+═══ 6. POLICE CLEARANCE ═══
+Required checks:
+- Document issued by SAPS (South African Police Service)
+- Police station name clearly visible — extract and report it
+- Issue date present and valid
+- Reference number present
+- Candidate name matches
+- ID number present and matches
+- Document is not expired (check validity period)
+- Official SAPS stamp/seal present
+
+═══ 7. QUALIFICATION / CERTIFICATE ═══
+Required checks:
+- Institution name visible
+- Qualification/certificate title visible
+- Candidate name matches
+- Date of issue present
+- Is it certified (stamped as a true copy)?
+- If certified: identify the certifying authority (police station or commissioner)
+- Stamp date validity (within ${stampValidityMonths} months)
+
 ═══ OTHER DOCUMENTS ═══
 For any document that doesn't match the above types:
 - Check image clarity
 - Check for signatures where expected
 - Check for dates where expected
+- Check for stamps and certification marks
+- If stamped: identify police station or commissioner
 - Extract any ID numbers present
 
 VALIDATION OUTPUT RULES:
@@ -118,6 +153,7 @@ VALIDATION OUTPUT RULES:
 - Overall status: "fail" if ANY critical check fails, "warning" if non-critical issues exist, "pass" if all checks pass
 - Provide a plain-English explanation of findings
 - Be specific about what failed and why
+- ALWAYS extract and report: stamp_date, police_station, certification_authority when visible
 - If analysing from filename only (no image content), note that visual checks are pending and set appropriate confidence`;
 }
 
@@ -126,10 +162,9 @@ function isPdfFile(fileName: string): boolean {
 }
 
 async function analyzeWithOpenAI(apiKey: string, systemPrompt: string, fileUrl: string, fileName: string) {
-  // OpenAI Vision API doesn't support PDF URLs - only images (jpg, png, gif, webp)
   if (isPdfFile(fileName)) {
     console.log("Skipping OpenAI for PDF file - not supported by Vision API");
-    return null; // Signal to use fallback
+    return null;
   }
 
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -145,7 +180,7 @@ async function analyzeWithOpenAI(apiKey: string, systemPrompt: string, fileUrl: 
         {
           role: "user",
           content: [
-            { type: "text", text: `Analyze this document and validate it. Filename: "${fileName}"` },
+            { type: "text", text: `Analyze this document and validate it thoroughly. Filename: "${fileName}". Remember to extract stamp dates, police station names, and certification authority details.` },
             { type: "image_url", image_url: { url: fileUrl, detail: "high" } }
           ]
         }
@@ -158,13 +193,12 @@ async function analyzeWithOpenAI(apiKey: string, systemPrompt: string, fileUrl: 
 }
 
 async function analyzeWithLovableAI(apiKey: string, systemPrompt: string, fileUrl: string, fileName: string) {
-  // For Gemini, pass the file URL as an image_url content block for proper visual analysis
   const userContent = isPdfFile(fileName)
     ? [
-        { type: "text", text: `Analyze this document and determine its type, validate it against the rules, and extract candidate information.\n\nFilename: "${fileName}"\nFile URL: ${fileUrl}\n\nRespond using the extract_document_info function. Be thorough in your validation checks.` },
+        { type: "text", text: `Analyze this document and determine its type, validate it against the rules, and extract candidate information.\n\nFilename: "${fileName}"\nFile URL: ${fileUrl}\n\nRemember to extract stamp dates, police station names, and certification authority details. Respond using the extract_document_info function. Be thorough in your validation checks.` },
       ]
     : [
-        { type: "text", text: `Analyze this document and validate it. Filename: "${fileName}"` },
+        { type: "text", text: `Analyze this document and validate it thoroughly. Filename: "${fileName}". Remember to extract stamp dates, police station names, and certification authority details.` },
         { type: "image_url", image_url: { url: fileUrl, detail: "high" } }
       ];
 
@@ -183,9 +217,6 @@ async function analyzeWithLovableAI(apiKey: string, systemPrompt: string, fileUr
       tools: [toolSchema],
       tool_choice: { type: "function", function: { name: "extract_document_info" } }
     }),
-  });
-  return response;
-}
   });
   return response;
 }
@@ -209,7 +240,6 @@ serve(async (req) => {
 
     await supabase.from("documents").update({ validation_status: "processing" }).eq("id", document_id);
 
-    // Load settings
     const { data: settings } = await supabase.from("settings").select("*").limit(1).single();
     const confidenceThreshold = settings?.confidence_threshold || 80;
     const stampValidityMonths = settings?.stamp_validity_months || 3;
@@ -220,7 +250,7 @@ serve(async (req) => {
     let aiResponse: Response;
     let aiProvider = "lovable";
 
-    // Try OpenAI first for images (better vision), fall back to Lovable AI for PDFs and errors
+    // Try OpenAI first for images, fall back to Lovable AI for PDFs and errors
     if (OPENAI_API_KEY) {
       const openaiResult = await analyzeWithOpenAI(OPENAI_API_KEY, systemPrompt, file_url, file_name);
 
@@ -271,6 +301,9 @@ serve(async (req) => {
       issues: [] as string[],
       summary: "Could not fully analyze document",
       extracted_id_number: null as string | null,
+      stamp_date: null as string | null,
+      police_station: null as string | null,
+      certification_authority: null as string | null,
     };
 
     if (toolCall?.function?.arguments) {
@@ -292,6 +325,9 @@ serve(async (req) => {
         summary: extracted.summary,
         checks: extracted.checks || [],
         extracted_id_number: extracted.extracted_id_number || null,
+        stamp_date: extracted.stamp_date || null,
+        police_station: extracted.police_station || null,
+        certification_authority: extracted.certification_authority || null,
         ai_provider: aiProvider,
       },
       processed_at: new Date().toISOString(),
