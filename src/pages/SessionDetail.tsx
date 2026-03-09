@@ -211,6 +211,12 @@ const SessionDetail = () => {
         onComplete={handleUploadComplete}
         existingSessionId={id}
       />
+
+      <CandidateModal
+        candidate={selectedCandidate}
+        open={!!selectedCandidate}
+        onClose={() => setSelectedCandidate(null)}
+      />
     </div>
   );
 };
