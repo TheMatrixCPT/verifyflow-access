@@ -21,6 +21,7 @@ const SessionDetail = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [filter, setFilter] = useState<FilterType>("all");
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [selectedCandidate, setSelectedCandidate] = useState<CandidateData | null>(null);
   const queryClient = useQueryClient();
 
   const { data: session } = useQuery({
