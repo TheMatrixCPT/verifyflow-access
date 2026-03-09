@@ -1,8 +1,4 @@
-import { useState } from "react";
-import { ChevronDown, CheckCircle, AlertTriangle, XCircle, FileText, Eye, ExternalLink, Clock, Loader2 } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
-import { format } from "date-fns";
-import { toast } from "sonner";
+import { CheckCircle, AlertTriangle, XCircle, FileText } from "lucide-react";
 
 export interface DocumentCheck {
   name: string;
@@ -45,175 +41,29 @@ const statusConfig = {
   fail: { border: "border-l-error", badge: "vf-badge-error", label: "Fail", icon: XCircle, iconColor: "text-error" },
 };
 
-const docStatusIcon = {
-  pass: { icon: CheckCircle, color: "text-success", bg: "bg-success/10" },
-  warning: { icon: AlertTriangle, color: "text-warning", bg: "bg-warning/10" },
-  fail: { icon: XCircle, color: "text-error", bg: "bg-error/10" },
-};
+interface CandidateCardProps {
+  candidate: CandidateData;
+  onClick: () => void;
+}
 
-const checkStatusIcon = {
-  pass: { icon: CheckCircle, color: "text-success" },
-  warning: { icon: AlertTriangle, color: "text-warning" },
-  fail: { icon: XCircle, color: "text-error" },
-};
-
-const DocumentItem = ({ doc, index }: { doc: DocumentData; index: number }) => {
-  const [expanded, setExpanded] = useState(false);
-  const [viewingDoc, setViewingDoc] = useState(false);
-  const docCfg = docStatusIcon[doc.status];
-  const DocIcon = docCfg.icon;
-
-  const handleViewDocument = async (filePath: string) => {
-    setViewingDoc(true);
-    try {
-      const { data, error } = await supabase.storage.from("documents").createSignedUrl(filePath, 600);
-      if (error || !data?.signedUrl) {
-        console.error("Failed to get signed URL:", error);
-        toast.error("Could not open document. Please try again.");
-        return;
-      }
-      window.open(data.signedUrl, "_blank");
-    } catch (e) {
-      console.error("View document error:", e);
-      toast.error("Failed to open document");
-    } finally {
-      setViewingDoc(false);
-    }
-  };
-
-  return (
-    <div className={`rounded-lg border border-border p-3 ${docCfg.bg}`}>
-      <div
-        className="flex items-start justify-between mb-1 cursor-pointer"
-        onClick={() => setExpanded(!expanded)}
-      >
-        <div className="flex items-center gap-2">
-          <DocIcon className={`h-4 w-4 ${docCfg.color}`} />
-          <span className="text-sm font-semibold text-space-kadet">{doc.type}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">{doc.confidence}% confidence</span>
-          <span className={statusConfig[doc.status].badge}>{statusConfig[doc.status].label}</span>
-          <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${expanded ? "rotate-180" : ""}`} />
-        </div>
-      </div>
-
-      <div className="flex items-center justify-between mb-1">
-        <p className="text-xs text-muted-foreground flex items-center gap-1 min-w-0">
-          <Eye className="h-3 w-3 shrink-0" />
-          <span className="truncate">{doc.fileName}</span>
-        </p>
-        {doc.filePath && (
-          <button
-            className="shrink-0 text-xs font-medium text-purple hover:text-purple/80 underline flex items-center gap-0.5 ml-2"
-            disabled={viewingDoc}
-            onClick={(e) => {
-              e.stopPropagation();
-              handleViewDocument(doc.filePath!);
-            }}
-          >
-            {viewingDoc ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
-            ) : (
-              <ExternalLink className="h-3 w-3" />
-            )}
-            {viewingDoc ? "Opening..." : "View"}
-          </button>
-        )}
-      </div>
-
-      {doc.uploadedAt && (
-        <p className="text-[11px] text-muted-foreground flex items-center gap-1 mb-1">
-          <Clock className="h-3 w-3 shrink-0" />
-          Uploaded {format(new Date(doc.uploadedAt), "dd MMM yyyy 'at' HH:mm")}
-        </p>
-      )}
-
-      {expanded && (
-        <div className="mt-2 animate-slide-down">
-          {doc.summary && (
-            <p className="text-sm text-foreground mt-1">{doc.summary}</p>
-          )}
-
-          {doc.checks && doc.checks.length > 0 && (
-            <div className="mt-3 bg-card rounded-md border border-border overflow-hidden">
-              <p className="text-xs font-semibold text-space-kadet px-3 py-1.5 bg-muted border-b border-border">
-                Validation Checks
-              </p>
-              <div className="divide-y divide-border">
-                {doc.checks.map((check, j) => {
-                  const chk = checkStatusIcon[check.status as keyof typeof checkStatusIcon] || checkStatusIcon.warning;
-                  const ChkIcon = chk.icon;
-                  return (
-                    <div key={j} className="flex items-start gap-2 px-3 py-2">
-                      <ChkIcon className={`h-3.5 w-3.5 mt-0.5 shrink-0 ${chk.color}`} />
-                      <div className="min-w-0">
-                        <span className="text-xs font-medium text-space-kadet">{check.name}</span>
-                        <p className="text-xs text-muted-foreground">{check.detail}</p>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {(doc.extractedIdNumber || doc.stampDate || doc.policeStation || doc.certificationAuthority) && (
-            <div className="mt-2 space-y-1 text-xs text-muted-foreground">
-              {doc.extractedIdNumber && (
-                <p><span className="font-medium text-space-kadet">Extracted ID:</span> {doc.extractedIdNumber}</p>
-              )}
-              {doc.stampDate && (
-                <p><span className="font-medium text-space-kadet">Stamp Date:</span> {doc.stampDate}</p>
-              )}
-              {doc.policeStation && (
-                <p><span className="font-medium text-space-kadet">Police Station:</span> {doc.policeStation}</p>
-              )}
-              {doc.certificationAuthority && (
-                <p><span className="font-medium text-space-kadet">Certified By:</span> {doc.certificationAuthority}</p>
-              )}
-            </div>
-          )}
-
-          {doc.issues && doc.issues.length > 0 && (
-            <div className="mt-2 space-y-1">
-              {doc.issues.map((issue, j) => (
-                <div key={j} className="flex items-start gap-1.5 text-sm text-error">
-                  <XCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-                  <span>{issue}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-};
-
-const CandidateCard = ({ candidate }: { candidate: CandidateData }) => {
-  const [expanded, setExpanded] = useState(false);
+const CandidateCard = ({ candidate, onClick }: CandidateCardProps) => {
   const cfg = statusConfig[candidate.status];
-  const StatusIcon = cfg.icon;
 
   return (
     <div
       className={`vf-card border-l-4 ${cfg.border} cursor-pointer transition-all duration-200 hover:shadow-[var(--shadow-card-hover)]`}
-      onClick={() => setExpanded(!expanded)}
+      onClick={onClick}
     >
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-lg font-semibold text-space-kadet">{candidate.name}</h3>
+          <h3 className="text-lg font-semibold text-foreground">{candidate.name}</h3>
           <p className="text-sm text-muted-foreground mt-0.5">
             {candidate.idNumber !== "N/A" ? `ID: ${candidate.idNumber.slice(0, 4)}••••${candidate.idNumber.slice(-2)}` : "ID: Not extracted"}
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="text-right">
-            <div className="text-[32px] font-bold text-space-kadet leading-none">{candidate.score}%</div>
-            <span className={cfg.badge}>{cfg.label}</span>
-          </div>
-          <ChevronDown className={`h-5 w-5 text-muted-foreground transition-transform duration-200 ${expanded ? "rotate-180" : ""}`} />
+        <div className="text-right">
+          <div className="text-[32px] font-bold text-foreground leading-none">{candidate.score}%</div>
+          <span className={cfg.badge}>{cfg.label}</span>
         </div>
       </div>
 
@@ -222,43 +72,10 @@ const CandidateCard = ({ candidate }: { candidate: CandidateData }) => {
         {candidate.documents.length} document{candidate.documents.length !== 1 ? "s" : ""}
       </div>
 
-      {expanded && (
-        <div className="mt-4 pt-4 border-t border-border animate-slide-down" onClick={(e) => e.stopPropagation()}>
-          <div className="mb-4">
-            <p className="text-sm font-semibold text-space-kadet mb-3">Documents</p>
-            <div className="space-y-3">
-              {candidate.documents.map((doc, i) => (
-                <DocumentItem key={i} doc={doc} index={i} />
-              ))}
-            </div>
-          </div>
-
-          <div className="bg-muted rounded-md p-3">
-            <div className="flex items-start gap-2">
-              <StatusIcon className={`h-5 w-5 mt-0.5 ${cfg.iconColor}`} />
-              <div>
-                <p className="text-sm font-semibold text-space-kadet mb-1">Overall Assessment</p>
-                <p className="text-sm text-foreground">{candidate.summary}</p>
-              </div>
-            </div>
-          </div>
-
-          {candidate.issues && candidate.issues.length > 0 && (
-            <div className="mt-3 bg-error/5 border border-error/20 rounded-md p-3">
-              <p className="text-sm font-semibold text-error mb-2 flex items-center gap-1.5">
-                <AlertTriangle className="h-4 w-4" />
-                Issues Found ({candidate.issues.length})
-              </p>
-              <ul className="space-y-1">
-                {candidate.issues.map((issue, i) => (
-                  <li key={i} className="flex items-start gap-1.5 text-sm text-foreground">
-                    <span className="text-error mt-1.5">•</span>
-                    <span>{issue}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+      {candidate.issues && candidate.issues.length > 0 && (
+        <div className="flex items-center gap-1.5 mt-1 text-xs text-destructive">
+          <AlertTriangle className="h-3.5 w-3.5" />
+          {candidate.issues.length} issue{candidate.issues.length !== 1 ? "s" : ""} found
         </div>
       )}
     </div>
