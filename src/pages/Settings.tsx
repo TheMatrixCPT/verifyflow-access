@@ -53,12 +53,48 @@ const Settings = () => {
   const handleSave = async () => {
     setSaving(true);
     try {
-      await updateSettings({
-        confidence_threshold: confidence,
-        stamp_validity_months: stampValidity,
-        strict_mode: strictMode,
-        from_email: fromEmail || undefined,
-      });
+      // Save general settings and API keys in parallel
+      const apiKeysPayload: Record<string, string> = {};
+      if (openaiKey) apiKeysPayload.openai = openaiKey;
+      if (falKey) apiKeysPayload.fal = falKey;
+      if (googleVisionKey) apiKeysPayload.google_vision = googleVisionKey;
+      if (awsTextractKey) apiKeysPayload.aws_textract = awsTextractKey;
+
+      const promises: Promise<any>[] = [
+        updateSettings({
+          confidence_threshold: confidence,
+          stamp_validity_months: stampValidity,
+          strict_mode: strictMode,
+          from_email: fromEmail || undefined,
+        }),
+      ];
+
+      if (Object.keys(apiKeysPayload).length > 0) {
+        promises.push(
+          supabase.functions.invoke("manage-api-keys", {
+            method: "POST",
+            body: apiKeysPayload,
+          })
+        );
+      }
+
+      await Promise.all(promises);
+
+      // Update configured status and clear inputs
+      if (Object.keys(apiKeysPayload).length > 0) {
+        setApiKeysConfigured(prev => ({
+          ...prev,
+          ...(openaiKey ? { openai: true } : {}),
+          ...(falKey ? { fal: true } : {}),
+          ...(googleVisionKey ? { google_vision: true } : {}),
+          ...(awsTextractKey ? { aws_textract: true } : {}),
+        }));
+        setOpenaiKey("");
+        setFalKey("");
+        setGoogleVisionKey("");
+        setAwsTextractKey("");
+      }
+
       toast.success("Settings saved successfully. Changes will apply to all future validations.");
     } catch (e) {
       console.error("Failed to save settings:", e);
