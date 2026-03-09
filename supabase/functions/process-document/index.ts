@@ -341,8 +341,10 @@ serve(async (req) => {
       summary: "Could not fully analyze document",
       extracted_id_number: null as string | null,
       stamp_date: null as string | null,
+      stamp_date_valid: null as boolean | null,
       police_station: null as string | null,
       certification_authority: null as string | null,
+      extracted_info: null as Record<string, any> | null,
     };
 
     if (toolCall?.function?.arguments) {
