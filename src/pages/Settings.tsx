@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
-import { ArrowLeft, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronUp, Loader2, Check } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import Header from "@/components/Header";
 import { toast } from "sonner";
 import { getSettings, updateSettings } from "@/lib/api";
+import { supabase } from "@/integrations/supabase/client";
 
 const Settings = () => {
   const [confidence, setConfidence] = useState(80);
