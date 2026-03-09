@@ -10,7 +10,7 @@ const toolSchema = {
   type: "function",
   function: {
     name: "extract_document_info",
-    description: "Extract and validate document information",
+    description: "Extract and validate document information, including all readable content",
     parameters: {
       type: "object",
       properties: {
@@ -25,7 +25,7 @@ const toolSchema = {
           ],
           description: "The type of HR document"
         },
-        candidate_name: { type: "string", description: "Person's name or 'Unknown'" },
+        candidate_name: { type: "string", description: "Person's full name or 'Unknown'" },
         confidence: { type: "number", description: "Confidence score 0-100" },
         validation_status: { type: "string", enum: ["pass", "warning", "fail"] },
         checks: {
@@ -42,12 +42,36 @@ const toolSchema = {
         },
         issues: { type: "array", items: { type: "string" } },
         summary: { type: "string", description: "Plain-English validation summary" },
-        extracted_id_number: { type: "string", description: "SA ID number if found" },
-        stamp_date: { type: "string", description: "Date on certification stamp if found (ISO format or text)" },
+        extracted_id_number: { type: "string", description: "SA ID number if found (13 digits)" },
+        stamp_date: { type: "string", description: "Date on certification stamp if found (ISO format YYYY-MM-DD)" },
+        stamp_date_valid: { type: "boolean", description: "Whether the stamp date is within the configured validity period" },
         police_station: { type: "string", description: "Police station name if found on stamp or document" },
         certification_authority: { type: "string", description: "Commissioner of Oaths or Police station that certified the document" },
+        extracted_info: {
+          type: "object",
+          description: "All extracted information from the document",
+          properties: {
+            full_name: { type: "string", description: "Full name of person on document" },
+            id_number: { type: "string", description: "ID number if present" },
+            date_of_birth: { type: "string", description: "Date of birth if present" },
+            gender: { type: "string", description: "Gender if present" },
+            nationality: { type: "string", description: "Nationality or citizenship status" },
+            address: { type: "string", description: "Physical address if present" },
+            phone_number: { type: "string", description: "Phone number if present" },
+            email: { type: "string", description: "Email address if present" },
+            employer: { type: "string", description: "Employer name if present" },
+            job_title: { type: "string", description: "Job title or position if present" },
+            qualification_name: { type: "string", description: "Qualification/certificate name if applicable" },
+            institution: { type: "string", description: "Educational institution if applicable" },
+            issue_date: { type: "string", description: "Document issue date" },
+            expiry_date: { type: "string", description: "Document expiry date if present" },
+            reference_number: { type: "string", description: "Reference or document number" },
+            signature_present: { type: "boolean", description: "Whether a signature is present" },
+            additional_notes: { type: "string", description: "Any other extracted text or notable information" }
+          }
+        }
       },
-      required: ["document_type", "candidate_name", "confidence", "validation_status", "checks", "issues", "summary"],
+      required: ["document_type", "candidate_name", "confidence", "validation_status", "checks", "issues", "summary", "extracted_info"],
       additionalProperties: false
     }
   }
