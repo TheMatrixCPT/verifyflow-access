@@ -6,7 +6,7 @@
 
 @layer base {
   :root {
-    --background: 340 25% 95%;
+    --background: 220 20% 97%;
     --foreground: 224 46% 22%;
 
     --card: 0 0% 100%;
@@ -15,16 +15,16 @@
     --popover: 0 0% 100%;
     --popover-foreground: 224 46% 22%;
 
-    --primary: 242 83% 45%;
+    --primary: 264 83% 45%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 0 0% 97%;
+    --secondary: 220 14% 96%;
     --secondary-foreground: 224 46% 22%;
 
     --muted: 220 14% 96%;
     --muted-foreground: 220 9% 46%;
 
-    --accent: 0 68% 63%;
+    --accent: 264 83% 45%;
     --accent-foreground: 0 0% 100%;
 
     --destructive: 0 84% 60%;
@@ -32,34 +32,34 @@
 
     --border: 220 13% 91%;
     --input: 220 13% 84%;
-    --ring: 242 83% 45%;
+    --ring: 264 83% 45%;
 
-    --radius: 6px;
+    --radius: 8px;
 
-    /* Custom VerifyFlow tokens */
+    /* Custom tokens */
     --space-kadet: 224 46% 22%;
     --purple: 264 83% 45%;
-    --salmon: 0 86% 63%;
-    --pink: 0 47% 91%;
-    --pink-bg: 340 25% 95%;
+    --salmon: 264 83% 45%;
+    --pink: 220 14% 96%;
+    --pink-bg: 220 20% 97%;
 
-    --success: 160 59% 48%;
+    --success: 160 59% 42%;
     --warning: 38 92% 50%;
     --error: 0 84% 60%;
     --info: 217 91% 60%;
 
-    --shadow-card: 0 2px 8px rgba(29, 41, 81, 0.08);
-    --shadow-card-hover: 0 4px 16px rgba(29, 41, 81, 0.12);
-    --shadow-modal: 0 8px 32px rgba(29, 41, 81, 0.16);
+    --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+    --shadow-card-hover: 0 4px 12px rgba(0, 0, 0, 0.08);
+    --shadow-modal: 0 20px 60px rgba(0, 0, 0, 0.15);
 
-    --sidebar-background: 0 0% 98%;
-    --sidebar-foreground: 240 5.3% 26.1%;
-    --sidebar-primary: 240 5.9% 10%;
-    --sidebar-primary-foreground: 0 0% 98%;
-    --sidebar-accent: 240 4.8% 95.9%;
-    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 224 46% 22%;
+    --sidebar-primary: 264 83% 45%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 14% 96%;
+    --sidebar-accent-foreground: 224 46% 22%;
     --sidebar-border: 220 13% 91%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --sidebar-ring: 264 83% 45%;
   }
 
   .dark {
@@ -75,7 +75,7 @@
     --secondary-foreground: 0 0% 95%;
     --muted: 224 30% 18%;
     --muted-foreground: 220 9% 65%;
-    --accent: 0 86% 63%;
+    --accent: 264 83% 55%;
     --accent-foreground: 0 0% 100%;
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 95%;
@@ -99,41 +99,42 @@
   }
 
   body {
-    @apply bg-background text-foreground font-sans;
+    @apply bg-background text-foreground font-sans antialiased;
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
   }
 
   h1 {
-    @apply text-[32px] font-bold leading-[1.2] text-space-kadet;
+    @apply text-[28px] font-bold leading-[1.2] text-space-kadet;
   }
 
   h2 {
-    @apply text-[24px] font-semibold leading-[1.3] text-space-kadet;
+    @apply text-[22px] font-semibold leading-[1.3] text-space-kadet;
   }
 
   h3 {
-    @apply text-[18px] font-semibold leading-[1.4] text-space-kadet;
+    @apply text-[17px] font-semibold leading-[1.4] text-space-kadet;
   }
 }
 
 @layer components {
   .vf-card {
-    @apply bg-card rounded-lg border border-border p-6;
+    @apply bg-card rounded-xl border border-border p-6;
     box-shadow: var(--shadow-card);
     transition: all 200ms ease;
   }
 
   .vf-card-hover:hover {
     box-shadow: var(--shadow-card-hover);
-    @apply border-purple cursor-pointer;
+    transform: translateY(-1px);
+    @apply border-purple/30 cursor-pointer;
   }
 
   .vf-section {
-    @apply max-w-[1200px] mx-auto px-8 py-12;
+    @apply max-w-[1200px] mx-auto px-8 py-10;
   }
 
   .vf-input {
-    @apply bg-card border border-input rounded-md h-11 px-3 text-base w-full;
+    @apply bg-card border border-input rounded-lg h-11 px-3 text-base w-full;
     @apply focus:border-purple focus:ring-2 focus:ring-purple/10 focus:outline-none;
     transition: all 150ms ease;
   }
@@ -151,30 +152,30 @@
   }
 
   .vf-badge {
-    @apply inline-flex items-center px-2.5 py-1 rounded-xl text-xs font-semibold uppercase tracking-wide;
+    @apply inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold;
   }
 
   .vf-badge-success {
     @apply vf-badge;
-    background: hsl(var(--success) / 0.15);
+    background: hsl(var(--success) / 0.12);
     color: hsl(var(--success));
   }
 
   .vf-badge-warning {
     @apply vf-badge;
-    background: hsl(var(--warning) / 0.15);
+    background: hsl(var(--warning) / 0.12);
     color: hsl(var(--warning));
   }
 
   .vf-badge-error {
     @apply vf-badge;
-    background: hsl(var(--error) / 0.15);
+    background: hsl(var(--error) / 0.12);
     color: hsl(var(--error));
   }
 
   .vf-badge-info {
     @apply vf-badge;
-    background: hsl(var(--info) / 0.15);
+    background: hsl(var(--info) / 0.12);
     color: hsl(var(--info));
   }
 

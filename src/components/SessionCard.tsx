@@ -1,4 +1,4 @@
-import { FileText, Users } from "lucide-react";
+import { FileText, Users, CheckCircle, Clock, AlertTriangle } from "lucide-react";
 
 interface SessionCardProps {
   id: string;
@@ -12,47 +12,46 @@ interface SessionCardProps {
 }
 
 const statusConfig = {
-  complete: { label: "Complete", className: "vf-badge-success" },
-  "in-progress": { label: "In Progress", className: "vf-badge-info" },
-  "has-issues": { label: "Has Issues", className: "vf-badge-warning" },
+  complete: { label: "Verified", className: "vf-badge-success", icon: CheckCircle },
+  "in-progress": { label: "Pending", className: "vf-badge-info", icon: Clock },
+  "has-issues": { label: "Rejected", className: "vf-badge-error", icon: AlertTriangle },
 };
 
 const SessionCard = ({ id, name, timestamp, status, totalCandidates, validatedCandidates, progress, onClick }: SessionCardProps) => {
   const statusCfg = statusConfig[status];
+  const StatusIcon = statusCfg.icon;
 
   return (
     <div className="vf-card vf-card-hover" onClick={() => onClick(id)}>
       <div className="flex items-start justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-purple/10 flex items-center justify-center shrink-0">
+            <FileText className="h-5 w-5 text-purple" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-foreground leading-tight">{name}</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">{timestamp}</p>
+          </div>
+        </div>
+        <span className={statusCfg.className}>
+          <StatusIcon className="h-3 w-3 mr-1" />
+          {statusCfg.label}
+        </span>
+      </div>
+
+      <div className="flex gap-6 text-sm">
         <div>
-          <h3 className="text-lg font-semibold text-space-kadet">{name}</h3>
-          <p className="text-[13px] text-muted-foreground mt-1">{timestamp}</p>
+          <span className="text-muted-foreground">Documents: </span>
+          <span className="font-semibold text-foreground">{totalCandidates}</span>
         </div>
-        <span className={statusCfg.className}>{statusCfg.label}</span>
-      </div>
-
-      <div className="flex gap-4 mb-4">
-        <div className="flex-1 bg-muted rounded-md p-3">
-          <div className="flex items-center gap-1.5 text-[13px] text-muted-foreground mb-1">
-            <Users className="h-3.5 w-3.5" />
-            Candidates
-          </div>
-          <div className="text-[28px] font-bold text-space-kadet leading-tight">{totalCandidates}</div>
-        </div>
-        <div className="flex-1 bg-muted rounded-md p-3">
-          <div className="flex items-center gap-1.5 text-[13px] text-muted-foreground mb-1">
-            <FileText className="h-3.5 w-3.5" />
-            Validated
-          </div>
-          <div className="text-[28px] font-bold text-purple leading-tight">{validatedCandidates}</div>
+        <div>
+          <span className="text-muted-foreground">Validated: </span>
+          <span className="font-semibold text-purple">{validatedCandidates}</span>
         </div>
       </div>
 
-      <div className="border-t border-border pt-4">
-        <div className="flex items-center justify-between text-[13px] text-muted-foreground mb-2">
-          <span>Progress</span>
-          <span className="font-semibold text-space-kadet">{progress}%</span>
-        </div>
-        <div className="h-2 bg-muted rounded-full overflow-hidden">
+      <div className="mt-4">
+        <div className="h-1.5 bg-muted rounded-full overflow-hidden">
           <div
             className="h-full bg-purple rounded-full transition-all duration-400 ease-in-out"
             style={{ width: `${progress}%` }}
