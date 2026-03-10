@@ -92,14 +92,12 @@ const SessionDetail = () => {
       toast.error("No data to download");
       return;
     }
-
     generateReport({
       sessionName: session?.name || "Report",
       sessionDate: session ? format(new Date(session.created_at), "dd MMM yyyy, HH:mm") : "",
       stats,
       candidates: candidatesWithDocs,
     });
-
     toast.success("PDF report downloaded");
   };
 
@@ -114,109 +112,107 @@ const SessionDetail = () => {
     <div className="min-h-screen bg-background">
       <Header />
 
-      <div className="bg-space-kadet px-8 py-6">
-        <div className="max-w-[1400px] mx-auto">
-          <Link to="/" className="inline-flex items-center gap-1.5 text-primary-foreground/70 text-sm mb-3 hover:text-primary-foreground transition-colors">
-            <ArrowLeft className="h-4 w-4" /> Back to Dashboard
-          </Link>
-          <div className="flex items-start justify-between">
+      <div className="vf-section">
+        <Link to="/" className="inline-flex items-center gap-1.5 text-muted-foreground text-sm mb-4 hover:text-foreground transition-colors">
+          <ArrowLeft className="h-4 w-4" /> Back to Dashboard
+        </Link>
+
+        <div className="flex items-start justify-between mb-8">
+          <div>
+            <h1 className="text-[28px] font-bold text-foreground">{session?.name || "Loading..."}</h1>
+            <p className="text-muted-foreground text-sm mt-1">
+              {session ? format(new Date(session.created_at), "MMM d, yyyy 'at' HH:mm") : ""}
+            </p>
+          </div>
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => setUploadOpen(true)}>
+              <Upload className="h-4 w-4" /> Upload More
+            </Button>
+            <Button variant="default" onClick={handleDownloadReport}>
+              <Download className="h-4 w-4" /> Download Report
+            </Button>
+          </div>
+        </div>
+
+        {/* Stats Bar */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          <div className="vf-card flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-purple/10 flex items-center justify-center">
+              <Users className="h-4 w-4 text-purple" />
+            </div>
             <div>
-              <h1 className="text-2xl font-bold text-primary-foreground">{session?.name || "Loading..."}</h1>
-              <p className="text-primary-foreground/70 text-sm mt-1">
-                {session ? format(new Date(session.created_at), "MMM d, yyyy 'at' HH:mm") : ""}
-              </p>
+              <p className="text-[22px] font-bold text-foreground leading-none">{stats.total}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Candidates</p>
             </div>
-            <div className="flex gap-3">
-              <Button
-                variant="secondary"
-                className="bg-primary-foreground/10 border-primary-foreground/30 text-primary-foreground hover:bg-primary-foreground/20"
-                onClick={() => setUploadOpen(true)}
-              >
-                <Upload className="h-4 w-4" /> Upload More
-              </Button>
-              <Button
-                variant="secondary"
-                className="bg-accent text-accent-foreground hover:bg-accent/90"
-                onClick={handleDownloadReport}
-              >
-                <Download className="h-4 w-4" /> Download Report
-              </Button>
+          </div>
+          <div className="vf-card flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-success/10 flex items-center justify-center">
+              <CheckCircle className="h-4 w-4 text-success" />
+            </div>
+            <div>
+              <p className="text-[22px] font-bold text-foreground leading-none">{stats.validated}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Validated</p>
+            </div>
+          </div>
+          <div className="vf-card flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-purple/10 flex items-center justify-center">
+              <span className="text-sm font-bold text-purple">{stats.complete}%</span>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Pass Rate</p>
+            </div>
+          </div>
+          <div className="vf-card flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-warning/10 flex items-center justify-center">
+              <AlertTriangle className="h-4 w-4 text-warning" />
+            </div>
+            <div>
+              <p className="text-[22px] font-bold text-foreground leading-none">{stats.issues}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Issues</p>
             </div>
           </div>
         </div>
-      </div>
 
-      <div className="bg-pink/30 border-b border-border">
-        <div className="max-w-[1400px] mx-auto px-8 py-4 flex gap-8 flex-wrap">
-          <div className="flex items-center gap-2">
-            <Users className="h-5 w-5 text-purple" />
-            <span className="text-sm"><strong className="text-space-kadet">{stats.total}</strong> <span className="text-muted-foreground">Candidates</span></span>
-          </div>
-          <div className="flex items-center gap-2">
-            <CheckCircle className="h-5 w-5 text-success" />
-            <span className="text-sm"><strong className="text-space-kadet">{stats.validated}</strong> <span className="text-muted-foreground">Validated</span></span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-sm"><strong className="text-purple">{stats.complete}%</strong> <span className="text-muted-foreground">Pass Rate</span></span>
-          </div>
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="h-5 w-5 text-warning" />
-            <span className="text-sm"><strong className="text-space-kadet">{stats.issues}</strong> <span className="text-muted-foreground">Issues</span></span>
-          </div>
-        </div>
-      </div>
-
-      <div className="bg-card border-b border-border">
-        <div className="max-w-[1400px] mx-auto px-8 py-4 flex items-center justify-between gap-4 flex-wrap">
-          <div className="relative w-[300px]">
+        {/* Search and Filter */}
+        <div className="vf-card mb-6 flex items-center justify-between gap-4 flex-wrap">
+          <div className="relative w-[280px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <input type="text" className="vf-input pl-10" placeholder="Search by name or ID..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+            <input type="text" className="vf-input pl-10 h-10" placeholder="Search by name or ID..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
           </div>
           <div className="flex items-center gap-2">
             {(["all", "pass", "warning", "fail"] as FilterType[]).map((f) => (
-              <Button key={f} variant={filter === f ? "outline" : "secondary"} size="sm" onClick={() => setFilter(f)} className={filter === f ? "border-purple text-purple" : ""}>
+              <Button key={f} variant={filter === f ? "default" : "secondary"} size="sm" onClick={() => setFilter(f)}>
                 {f === "all" ? "All" : f === "pass" ? "Validated" : f === "warning" ? "Has Issues" : "Failed"}
               </Button>
             ))}
             <span className="text-sm text-muted-foreground ml-2">Showing {filtered.length} candidates</span>
           </div>
         </div>
-      </div>
 
-      <div className="max-w-[1400px] mx-auto px-8 py-8">
+        {/* Candidates Grid */}
         {filtered.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-start">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 items-start">
             {filtered.map((candidate) => (
               <CandidateCard key={candidate.id} candidate={candidate} onClick={() => setSelectedCandidate(candidate)} />
             ))}
           </div>
         ) : candidates.length === 0 ? (
           <div className="text-center py-16">
-            <Users className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-space-kadet mb-2">No candidates found</h3>
-            <p className="text-muted-foreground">Documents are still being processed or no candidates were detected</p>
+            <Users className="h-14 w-14 text-muted-foreground mx-auto mb-4" />
+            <h3 className="text-lg font-semibold text-foreground mb-2">No candidates found</h3>
+            <p className="text-muted-foreground text-sm">Documents are still being processed or no candidates were detected</p>
           </div>
         ) : (
           <div className="text-center py-16">
-            <Search className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-space-kadet mb-2">No matches found</h3>
-            <p className="text-muted-foreground">Try adjusting your search or filter criteria</p>
+            <Search className="h-14 w-14 text-muted-foreground mx-auto mb-4" />
+            <h3 className="text-lg font-semibold text-foreground mb-2">No matches found</h3>
+            <p className="text-muted-foreground text-sm">Try adjusting your search or filter criteria</p>
           </div>
         )}
       </div>
 
-      <UploadModal
-        open={uploadOpen}
-        onClose={() => setUploadOpen(false)}
-        onComplete={handleUploadComplete}
-        existingSessionId={id}
-      />
-
-      <CandidateModal
-        candidate={selectedCandidate}
-        open={!!selectedCandidate}
-        onClose={() => setSelectedCandidate(null)}
-      />
+      <UploadModal open={uploadOpen} onClose={() => setUploadOpen(false)} onComplete={handleUploadComplete} existingSessionId={id} />
+      <CandidateModal candidate={selectedCandidate} open={!!selectedCandidate} onClose={() => setSelectedCandidate(null)} />
     </div>
   );
 };
