@@ -200,6 +200,49 @@ function isPdfFile(fileName: string): boolean {
   return fileName.toLowerCase().endsWith('.pdf');
 }
 
+async function analyzeWithOpenRouter(apiKey: string, systemPrompt: string, fileUrl: string, fileName: string, asyncMode: boolean = false, documentId?: string) {
+  const userContent = isPdfFile(fileName)
+    ? [
+        { type: "text", text: `Analyze this document and determine its type, validate it against the rules, and extract candidate information.\n\nFilename: "${fileName}"\nFile URL: ${fileUrl}\n\nRemember to extract stamp dates, police station names, and certification authority details. Respond using the extract_document_info function. Be thorough in your validation checks.` },
+      ]
+    : [
+        { type: "text", text: `Analyze this document and validate it thoroughly. Filename: "${fileName}". Remember to extract stamp dates, police station names, and certification authority details.` },
+        { type: "image_url", image_url: { url: fileUrl, detail: "high" } }
+      ];
+
+  const body: Record<string, any> = {
+    model: "google/gemini-2.5-flash",
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userContent }
+    ],
+    tools: [toolSchema],
+    tool_choice: { type: "function", function: { name: "extract_document_info" } }
+  };
+
+  // For async mode, use OpenRouter's callback webhook
+  if (asyncMode && documentId) {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    body.route = "async";
+    body.provider = {
+      callback_url: `${supabaseUrl}/functions/v1/openrouter-webhook`,
+      custom_data: { document_id: documentId },
+    };
+  }
+
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": Deno.env.get("SUPABASE_URL") || "https://lovable.dev",
+      "X-Title": "CapaCiTi Document Validator",
+    },
+    body: JSON.stringify(body),
+  });
+  return response;
+}
+
 async function analyzeWithOpenAI(apiKey: string, systemPrompt: string, fileUrl: string, fileName: string) {
   if (isPdfFile(fileName)) {
     console.log("Skipping OpenAI for PDF file - not supported by Vision API");
@@ -264,13 +307,14 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { document_id, file_url, file_name } = await req.json();
+    const { document_id, file_url, file_name, async_mode } = await req.json();
 
+    const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
 
-    if (!LOVABLE_API_KEY && !OPENAI_API_KEY) {
-      throw new Error("No AI API key configured. Need LOVABLE_API_KEY or OPENAI_API_KEY.");
+    if (!OPENROUTER_API_KEY && !LOVABLE_API_KEY && !OPENAI_API_KEY) {
+      throw new Error("No AI API key configured. Need OPENROUTER_API_KEY, LOVABLE_API_KEY, or OPENAI_API_KEY.");
     }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -287,22 +331,60 @@ serve(async (req) => {
     const systemPrompt = buildSystemPrompt(confidenceThreshold, stampValidityMonths, strictMode);
 
     let aiResponse: Response;
-    let aiProvider = "lovable";
+    let aiProvider = "openrouter";
 
-    // Try OpenAI first for images, fall back to Lovable AI for PDFs and errors
-    if (OPENAI_API_KEY) {
+    // Priority: OpenRouter > OpenAI > Lovable AI
+    // For async_mode (batch processing), use OpenRouter webhooks
+    if (OPENROUTER_API_KEY) {
+      if (async_mode) {
+        console.log("Using OpenRouter ASYNC mode with webhook callback for document:", document_id);
+        const asyncResult = await analyzeWithOpenRouter(OPENROUTER_API_KEY, systemPrompt, file_url, file_name, true, document_id);
+        
+        if (asyncResult.ok) {
+          // Async request accepted - webhook will handle the result
+          return new Response(JSON.stringify({
+            success: true,
+            document_id,
+            ai_provider: "openrouter-async",
+            status: "processing_async",
+            message: "Document submitted for async processing. Results will be delivered via webhook.",
+          }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        } else {
+          console.log(`OpenRouter async failed (${asyncResult.status}), falling back to sync`);
+        }
+      }
+
+      // Sync mode with OpenRouter
+      console.log("Using OpenRouter (sync) for document analysis");
+      aiResponse = await analyzeWithOpenRouter(OPENROUTER_API_KEY, systemPrompt, file_url, file_name);
+      aiProvider = "openrouter";
+
+      if (!aiResponse.ok) {
+        console.log(`OpenRouter returned ${aiResponse.status}, falling back`);
+        // Fall through to other providers
+        if (OPENAI_API_KEY) {
+          const openaiResult = await analyzeWithOpenAI(OPENAI_API_KEY, systemPrompt, file_url, file_name);
+          if (openaiResult && openaiResult.ok) {
+            aiResponse = openaiResult;
+            aiProvider = "openai";
+          } else if (LOVABLE_API_KEY) {
+            aiResponse = await analyzeWithLovableAI(LOVABLE_API_KEY, systemPrompt, file_url, file_name);
+            aiProvider = "lovable";
+          }
+        } else if (LOVABLE_API_KEY) {
+          aiResponse = await analyzeWithLovableAI(LOVABLE_API_KEY, systemPrompt, file_url, file_name);
+          aiProvider = "lovable";
+        }
+      }
+    } else if (OPENAI_API_KEY) {
       const openaiResult = await analyzeWithOpenAI(OPENAI_API_KEY, systemPrompt, file_url, file_name);
-
       if (openaiResult && openaiResult.ok) {
         console.log("Using OpenAI GPT-4o Vision for document analysis");
         aiProvider = "openai";
         aiResponse = openaiResult;
       } else {
-        if (openaiResult) {
-          console.log(`OpenAI returned ${openaiResult.status}, falling back to Lovable AI`);
-        } else {
-          console.log("OpenAI skipped (PDF file), using Lovable AI");
-        }
         aiProvider = "lovable";
         aiResponse = await analyzeWithLovableAI(LOVABLE_API_KEY!, systemPrompt, file_url, file_name);
       }
