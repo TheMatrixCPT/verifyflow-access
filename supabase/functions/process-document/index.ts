@@ -200,15 +200,69 @@ function isPdfFile(fileName: string): boolean {
   return fileName.toLowerCase().endsWith('.pdf');
 }
 
-async function analyzeWithOpenRouter(apiKey: string, systemPrompt: string, fileUrl: string, fileName: string, asyncMode: boolean = false, documentId?: string) {
-  const userContent = isPdfFile(fileName)
-    ? [
-        { type: "text", text: `Analyze this document and determine its type, validate it against the rules, and extract candidate information.\n\nFilename: "${fileName}"\nFile URL: ${fileUrl}\n\nRemember to extract stamp dates, police station names, and certification authority details. Respond using the extract_document_info function. Be thorough in your validation checks.` },
-      ]
-    : [
-        { type: "text", text: `Analyze this document and validate it thoroughly. Filename: "${fileName}". Remember to extract stamp dates, police station names, and certification authority details.` },
+function getMimeType(fileName: string): string {
+  const ext = fileName.toLowerCase().split('.').pop();
+  const mimeMap: Record<string, string> = {
+    pdf: 'application/pdf',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    webp: 'image/webp',
+  };
+  return mimeMap[ext || ''] || 'application/octet-stream';
+}
+
+async function fetchFileAsBase64(fileUrl: string): Promise<string> {
+  const response = await fetch(fileUrl);
+  if (!response.ok) throw new Error(`Failed to fetch file: ${response.status}`);
+  const arrayBuffer = await response.arrayBuffer();
+  const uint8Array = new Uint8Array(arrayBuffer);
+  let binary = '';
+  const chunkSize = 8192;
+  for (let i = 0; i < uint8Array.length; i += chunkSize) {
+    const chunk = uint8Array.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
+async function buildUserContent(fileUrl: string, fileName: string): Promise<any[]> {
+  const textPrompt = `Analyze this document and validate it thoroughly. Filename: "${fileName}". Remember to extract stamp dates, police station names, and certification authority details. Respond using the extract_document_info function. Be thorough in your validation checks.`;
+  
+  try {
+    const base64 = await fetchFileAsBase64(fileUrl);
+    const mimeType = getMimeType(fileName);
+    
+    if (isPdfFile(fileName)) {
+      // For Gemini-compatible APIs, use inline_data for PDFs
+      return [
+        { type: "text", text: textPrompt },
+        { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}` } }
+      ];
+    } else {
+      return [
+        { type: "text", text: textPrompt },
+        { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}`, detail: "high" } }
+      ];
+    }
+  } catch (e) {
+    console.error("Failed to fetch file for base64 encoding:", e);
+    // Fallback to URL-based approach for images
+    if (!isPdfFile(fileName)) {
+      return [
+        { type: "text", text: textPrompt },
         { type: "image_url", image_url: { url: fileUrl, detail: "high" } }
       ];
+    }
+    // For PDFs that can't be fetched, text-only fallback
+    return [
+      { type: "text", text: `${textPrompt}\n\nFile URL (could not download): ${fileUrl}` },
+    ];
+  }
+}
+
+async function analyzeWithOpenRouter(apiKey: string, systemPrompt: string, fileUrl: string, fileName: string, asyncMode: boolean = false, documentId?: string) {
+  const userContent = await buildUserContent(fileUrl, fileName);
 
   const body: Record<string, any> = {
     model: "google/gemini-2.5-flash",
@@ -249,6 +303,8 @@ async function analyzeWithOpenAI(apiKey: string, systemPrompt: string, fileUrl: 
     return null;
   }
 
+  const userContent = await buildUserContent(fileUrl, fileName);
+
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -259,13 +315,7 @@ async function analyzeWithOpenAI(apiKey: string, systemPrompt: string, fileUrl: 
       model: "gpt-4o",
       messages: [
         { role: "system", content: systemPrompt },
-        {
-          role: "user",
-          content: [
-            { type: "text", text: `Analyze this document and validate it thoroughly. Filename: "${fileName}". Remember to extract stamp dates, police station names, and certification authority details.` },
-            { type: "image_url", image_url: { url: fileUrl, detail: "high" } }
-          ]
-        }
+        { role: "user", content: userContent }
       ],
       tools: [toolSchema],
       tool_choice: { type: "function", function: { name: "extract_document_info" } }
@@ -275,14 +325,7 @@ async function analyzeWithOpenAI(apiKey: string, systemPrompt: string, fileUrl: 
 }
 
 async function analyzeWithLovableAI(apiKey: string, systemPrompt: string, fileUrl: string, fileName: string) {
-  const userContent = isPdfFile(fileName)
-    ? [
-        { type: "text", text: `Analyze this document and determine its type, validate it against the rules, and extract candidate information.\n\nFilename: "${fileName}"\nFile URL: ${fileUrl}\n\nRemember to extract stamp dates, police station names, and certification authority details. Respond using the extract_document_info function. Be thorough in your validation checks.` },
-      ]
-    : [
-        { type: "text", text: `Analyze this document and validate it thoroughly. Filename: "${fileName}". Remember to extract stamp dates, police station names, and certification authority details.` },
-        { type: "image_url", image_url: { url: fileUrl, detail: "high" } }
-      ];
+  const userContent = await buildUserContent(fileUrl, fileName);
 
   const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
