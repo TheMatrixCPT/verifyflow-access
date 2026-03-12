@@ -303,6 +303,8 @@ async function analyzeWithOpenAI(apiKey: string, systemPrompt: string, fileUrl: 
     return null;
   }
 
+  const userContent = await buildUserContent(fileUrl, fileName);
+
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -313,13 +315,7 @@ async function analyzeWithOpenAI(apiKey: string, systemPrompt: string, fileUrl: 
       model: "gpt-4o",
       messages: [
         { role: "system", content: systemPrompt },
-        {
-          role: "user",
-          content: [
-            { type: "text", text: `Analyze this document and validate it thoroughly. Filename: "${fileName}". Remember to extract stamp dates, police station names, and certification authority details.` },
-            { type: "image_url", image_url: { url: fileUrl, detail: "high" } }
-          ]
-        }
+        { role: "user", content: userContent }
       ],
       tools: [toolSchema],
       tool_choice: { type: "function", function: { name: "extract_document_info" } }
@@ -329,14 +325,7 @@ async function analyzeWithOpenAI(apiKey: string, systemPrompt: string, fileUrl: 
 }
 
 async function analyzeWithLovableAI(apiKey: string, systemPrompt: string, fileUrl: string, fileName: string) {
-  const userContent = isPdfFile(fileName)
-    ? [
-        { type: "text", text: `Analyze this document and determine its type, validate it against the rules, and extract candidate information.\n\nFilename: "${fileName}"\nFile URL: ${fileUrl}\n\nRemember to extract stamp dates, police station names, and certification authority details. Respond using the extract_document_info function. Be thorough in your validation checks.` },
-      ]
-    : [
-        { type: "text", text: `Analyze this document and validate it thoroughly. Filename: "${fileName}". Remember to extract stamp dates, police station names, and certification authority details.` },
-        { type: "image_url", image_url: { url: fileUrl, detail: "high" } }
-      ];
+  const userContent = await buildUserContent(fileUrl, fileName);
 
   const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
