@@ -128,11 +128,11 @@ const Index = () => {
                   onClick={handleSessionClick}
                 />
                 <button
-                  onClick={(e) => handleDelete(session.id, e)}
-                  className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity bg-card border border-border rounded-lg p-1.5 hover:bg-error/10 hover:border-error/30"
+                  onClick={(e) => handleDeleteClick(session.id, session.name, e)}
+                  className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity bg-card border border-border rounded-lg p-1.5 hover:bg-destructive/10 hover:border-destructive/30"
                   title="Delete session"
                 >
-                  <Trash2 className="h-4 w-4 text-muted-foreground hover:text-error" />
+                  <Trash2 className="h-4 w-4 text-muted-foreground hover:text-destructive" />
                 </button>
               </div>
             ))}
