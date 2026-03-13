@@ -205,7 +205,7 @@ const SessionDetail = () => {
         {filtered.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 items-start">
             {filtered.map((candidate) => (
-              <CandidateCard key={candidate.id} candidate={candidate} onClick={() => setSelectedCandidate(candidate)} />
+              <CandidateCard key={candidate.id} candidate={candidate} onClick={() => setSelectedCandidate(candidate)} onDelete={handleDeleteCandidate} />
             ))}
           </div>
         ) : candidates.length === 0 ? (

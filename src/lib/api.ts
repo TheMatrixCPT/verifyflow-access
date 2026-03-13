@@ -272,6 +272,17 @@ export async function deleteSession(id: string) {
   if (error) throw error;
 }
 
+export async function deleteCandidate(candidateId: string) {
+  // Delete associated documents from storage and DB
+  const { data: docs } = await supabase.from("documents").select("file_path").eq("candidate_id", candidateId);
+  if (docs && docs.length > 0) {
+    await supabase.storage.from("documents").remove(docs.map((d) => d.file_path));
+    await supabase.from("documents").delete().eq("candidate_id", candidateId);
+  }
+  const { error } = await supabase.from("candidates").delete().eq("id", candidateId);
+  if (error) throw error;
+}
+
 // Settings
 export async function getSettings() {
   const { data, error } = await supabase
