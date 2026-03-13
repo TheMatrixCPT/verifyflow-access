@@ -9,9 +9,20 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getSessions, deleteSession } from "@/lib/api";
 import { toast } from "sonner";
 import { format } from "date-fns";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 const Index = () => {
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
@@ -30,16 +41,21 @@ const Index = () => {
     navigate(`/session/${sessionId}`);
   };
 
-  const handleDelete = async (id: string, e: React.MouseEvent) => {
+  const handleDeleteClick = (id: string, name: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm("Are you sure you want to delete this session and all its data?")) return;
+    setDeleteTarget({ id, name });
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteTarget) return;
     try {
-      await deleteSession(id);
+      await deleteSession(deleteTarget.id);
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
       toast.success("Session deleted");
     } catch {
       toast.error("Failed to delete session");
     }
+    setDeleteTarget(null);
   };
 
   // Compute dashboard stats
@@ -112,11 +128,11 @@ const Index = () => {
                   onClick={handleSessionClick}
                 />
                 <button
-                  onClick={(e) => handleDelete(session.id, e)}
-                  className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity bg-card border border-border rounded-lg p-1.5 hover:bg-error/10 hover:border-error/30"
+                  onClick={(e) => handleDeleteClick(session.id, session.name, e)}
+                  className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity bg-card border border-border rounded-lg p-1.5 hover:bg-destructive/10 hover:border-destructive/30"
                   title="Delete session"
                 >
-                  <Trash2 className="h-4 w-4 text-muted-foreground hover:text-error" />
+                  <Trash2 className="h-4 w-4 text-muted-foreground hover:text-destructive" />
                 </button>
               </div>
             ))}
@@ -135,6 +151,26 @@ const Index = () => {
       </div>
 
       <UploadModal open={uploadOpen} onClose={() => setUploadOpen(false)} onComplete={handleComplete} />
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Session</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <span className="font-semibold text-foreground">{deleteTarget?.name}</span> and all its data? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={handleDeleteConfirm}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
