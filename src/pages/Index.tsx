@@ -9,9 +9,20 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getSessions, deleteSession } from "@/lib/api";
 import { toast } from "sonner";
 import { format } from "date-fns";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 const Index = () => {
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
@@ -30,16 +41,21 @@ const Index = () => {
     navigate(`/session/${sessionId}`);
   };
 
-  const handleDelete = async (id: string, e: React.MouseEvent) => {
+  const handleDeleteClick = (id: string, name: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm("Are you sure you want to delete this session and all its data?")) return;
+    setDeleteTarget({ id, name });
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteTarget) return;
     try {
-      await deleteSession(id);
+      await deleteSession(deleteTarget.id);
       queryClient.invalidateQueries({ queryKey: ["sessions"] });
       toast.success("Session deleted");
     } catch {
       toast.error("Failed to delete session");
     }
+    setDeleteTarget(null);
   };
 
   // Compute dashboard stats
