@@ -130,11 +130,33 @@ export async function uploadAndProcessFiles(
       await supabase.from("candidates").delete().eq("session_id", sessionId);
     }
 
+    // Normalize candidate names for grouping: case-insensitive, order-insensitive, handle middle names
+    function normalizeName(name: string): string {
+      return name
+        .toLowerCase()
+        .replace(/[^a-z\s]/g, '') // remove non-alpha except spaces
+        .split(/\s+/)
+        .filter(Boolean)
+        .sort()
+        .join(' ');
+    }
+
     const candidateMap = new Map<string, typeof docs>();
+    const normalizedToOriginal = new Map<string, string>();
+    
     for (const doc of docs) {
-      const name = doc.candidate_name_extracted || "Unknown";
-      if (!candidateMap.has(name)) candidateMap.set(name, []);
-      candidateMap.get(name)!.push(doc);
+      const rawName = doc.candidate_name_extracted || "Unknown";
+      const normalized = normalizeName(rawName);
+      
+      // Use the first encountered original name as the display name
+      if (!normalizedToOriginal.has(normalized)) {
+        // Use the version with proper casing (title case the raw name)
+        normalizedToOriginal.set(normalized, rawName.replace(/\b\w/g, c => c.toUpperCase()).replace(/\s+/g, ' ').trim());
+      }
+      
+      const displayName = normalizedToOriginal.get(normalized)!;
+      if (!candidateMap.has(displayName)) candidateMap.set(displayName, []);
+      candidateMap.get(displayName)!.push(doc);
     }
 
     for (const [name, candidateDocs] of candidateMap) {
