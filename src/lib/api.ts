@@ -130,11 +130,33 @@ export async function uploadAndProcessFiles(
       await supabase.from("candidates").delete().eq("session_id", sessionId);
     }
 
+    // Normalize candidate names for grouping: case-insensitive, order-insensitive, handle middle names
+    function normalizeName(name: string): string {
+      return name
+        .toLowerCase()
+        .replace(/[^a-z\s]/g, '') // remove non-alpha except spaces
+        .split(/\s+/)
+        .filter(Boolean)
+        .sort()
+        .join(' ');
+    }
+
     const candidateMap = new Map<string, typeof docs>();
+    const normalizedToOriginal = new Map<string, string>();
+    
     for (const doc of docs) {
-      const name = doc.candidate_name_extracted || "Unknown";
-      if (!candidateMap.has(name)) candidateMap.set(name, []);
-      candidateMap.get(name)!.push(doc);
+      const rawName = doc.candidate_name_extracted || "Unknown";
+      const normalized = normalizeName(rawName);
+      
+      // Use the first encountered original name as the display name
+      if (!normalizedToOriginal.has(normalized)) {
+        // Use the version with proper casing (title case the raw name)
+        normalizedToOriginal.set(normalized, rawName.replace(/\b\w/g, c => c.toUpperCase()).replace(/\s+/g, ' ').trim());
+      }
+      
+      const displayName = normalizedToOriginal.get(normalized)!;
+      if (!candidateMap.has(displayName)) candidateMap.set(displayName, []);
+      candidateMap.get(displayName)!.push(doc);
     }
 
     for (const [name, candidateDocs] of candidateMap) {
@@ -247,6 +269,17 @@ export async function deleteSession(id: string) {
     await supabase.storage.from("documents").remove(docs.map((d) => d.file_path));
   }
   const { error } = await supabase.from("sessions").delete().eq("id", id);
+  if (error) throw error;
+}
+
+export async function deleteCandidate(candidateId: string) {
+  // Delete associated documents from storage and DB
+  const { data: docs } = await supabase.from("documents").select("file_path").eq("candidate_id", candidateId);
+  if (docs && docs.length > 0) {
+    await supabase.storage.from("documents").remove(docs.map((d) => d.file_path));
+    await supabase.from("documents").delete().eq("candidate_id", candidateId);
+  }
+  const { error } = await supabase.from("candidates").delete().eq("id", candidateId);
   if (error) throw error;
 }
 

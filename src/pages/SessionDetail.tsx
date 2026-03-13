@@ -7,7 +7,7 @@ import CandidateCard from "@/components/CandidateCard";
 import CandidateModal from "@/components/CandidateModal";
 import UploadModal from "@/components/UploadModal";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { getSession, getCandidates, getDocuments } from "@/lib/api";
+import { getSession, getCandidates, getDocuments, deleteCandidate } from "@/lib/api";
 import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
 import { toast } from "sonner";
@@ -99,6 +99,18 @@ const SessionDetail = () => {
       candidates: candidatesWithDocs,
     });
     toast.success("PDF report downloaded");
+  };
+
+  const handleDeleteCandidate = async (candidateId: string) => {
+    try {
+      await deleteCandidate(candidateId);
+      queryClient.invalidateQueries({ queryKey: ["candidates", id] });
+      queryClient.invalidateQueries({ queryKey: ["documents", id] });
+      queryClient.invalidateQueries({ queryKey: ["session", id] });
+      toast.success("Candidate deleted successfully");
+    } catch (e) {
+      toast.error("Failed to delete candidate");
+    }
   };
 
   const handleUploadComplete = (sessionId: string) => {
@@ -193,7 +205,7 @@ const SessionDetail = () => {
         {filtered.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 items-start">
             {filtered.map((candidate) => (
-              <CandidateCard key={candidate.id} candidate={candidate} onClick={() => setSelectedCandidate(candidate)} />
+              <CandidateCard key={candidate.id} candidate={candidate} onClick={() => setSelectedCandidate(candidate)} onDelete={handleDeleteCandidate} />
             ))}
           </div>
         ) : candidates.length === 0 ? (
