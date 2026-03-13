@@ -1,4 +1,15 @@
-import { CheckCircle, AlertTriangle, XCircle, FileText } from "lucide-react";
+import { useState } from "react";
+import { CheckCircle, AlertTriangle, XCircle, FileText, Trash2 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export interface DocumentCheck {
   name: string;
