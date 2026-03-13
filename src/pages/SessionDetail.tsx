@@ -101,6 +101,18 @@ const SessionDetail = () => {
     toast.success("PDF report downloaded");
   };
 
+  const handleDeleteCandidate = async (candidateId: string) => {
+    try {
+      await deleteCandidate(candidateId);
+      queryClient.invalidateQueries({ queryKey: ["candidates", id] });
+      queryClient.invalidateQueries({ queryKey: ["documents", id] });
+      queryClient.invalidateQueries({ queryKey: ["session", id] });
+      toast.success("Candidate deleted successfully");
+    } catch (e) {
+      toast.error("Failed to delete candidate");
+    }
+  };
+
   const handleUploadComplete = (sessionId: string) => {
     setUploadOpen(false);
     queryClient.invalidateQueries({ queryKey: ["session", id] });
