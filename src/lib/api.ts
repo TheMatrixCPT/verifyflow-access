@@ -160,9 +160,14 @@ export async function uploadAndProcessFiles(
     }
 
     for (const [name, candidateDocs] of candidateMap) {
-      const avgScore = Math.round(
-        candidateDocs.reduce((sum, d) => sum + (Number(d.confidence_score) || 0), 0) / candidateDocs.length
-      );
+      // Calculate score from checks: passed checks / total checks * 100
+      const allChecks = candidateDocs.flatMap((d) => {
+        const details = d.validation_details as any;
+        return details?.checks || [];
+      });
+      const totalChecks = allChecks.length;
+      const passedChecks = allChecks.filter((c: any) => c.status === "pass").length;
+      const avgScore = totalChecks > 0 ? Math.round((passedChecks / totalChecks) * 100) : 0;
       const hasFailure = candidateDocs.some((d) => d.validation_status === "fail");
       const hasWarning = candidateDocs.some((d) => d.validation_status === "warning");
       const status = hasFailure ? "fail" : hasWarning ? "warning" : "pass";
