@@ -62,11 +62,17 @@ const SessionDetail = () => {
       extractedInfo: (d.validation_details as any)?.extracted_info || undefined,
     }));
 
+    // Calculate score dynamically from checks: passed / total * 100
+    const allChecks = docData.flatMap((d) => d.checks || []);
+    const totalChecks = allChecks.length;
+    const passedChecks = allChecks.filter((ch) => ch.status === "pass").length;
+    const dynamicScore = totalChecks > 0 ? Math.round((passedChecks / totalChecks) * 100) : (c.score || 0);
+
     return {
       id: c.id,
       name: c.name,
       idNumber: c.id_number || "N/A",
-      score: c.score || 0,
+      score: dynamicScore,
       status: (c.status as "pass" | "warning" | "fail") || "pass",
       documents: docData,
       summary: c.summary || "No summary available",
