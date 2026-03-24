@@ -75,6 +75,7 @@ export async function checkCrossCohortCandidates(
   return matches;
 }
 
+export async function checkDuplicateFiles(sessionId: string, fileNames: string[]): Promise<{ fileName: string; existingUploadedAt: string }[]> {
   const { data: existingDocs } = await supabase
     .from("documents")
     .select("file_name, created_at")
