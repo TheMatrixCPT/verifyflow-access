@@ -249,6 +249,40 @@ const CandidateModal = ({ candidate, open, onClose }: CandidateModalProps) => {
           </div>
         </DialogHeader>
 
+        {/* SA ID Structural Validation */}
+        {candidate.idNumber && candidate.idNumber !== "N/A" && (() => {
+          const idResult = validateSAId(candidate.idNumber);
+          return (
+            <div className={`rounded-lg border p-4 ${idResult.valid ? "border-success/30 bg-success/5" : "border-destructive/30 bg-destructive/5"}`}>
+              <p className="text-sm font-semibold text-foreground mb-2 flex items-center gap-1.5">
+                <Fingerprint className="h-4 w-4" />
+                SA ID Structural Validation
+                <span className={idResult.valid ? "vf-badge-success" : "vf-badge-error"}>
+                  {idResult.valid ? "Valid" : "Invalid"}
+                </span>
+              </p>
+              {idResult.dateOfBirth && (
+                <p className="text-xs text-muted-foreground mb-1">DOB: {idResult.dateOfBirth} · Gender: {idResult.gender} · {idResult.citizenship}</p>
+              )}
+              <div className="space-y-1 mt-2">
+                {idResult.checks.map((check, i) => {
+                  const ChkIcon = check.status === "pass" ? CheckCircle : XCircle;
+                  const color = check.status === "pass" ? "text-success" : "text-error";
+                  return (
+                    <div key={i} className="flex items-start gap-2">
+                      <ChkIcon className={`h-3.5 w-3.5 mt-0.5 shrink-0 ${color}`} />
+                      <div>
+                        <span className="text-xs font-medium text-foreground">{check.name}</span>
+                        <p className="text-xs text-muted-foreground">{check.detail}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
+
         {/* Overall Assessment */}
         <div className="bg-muted rounded-lg p-4">
           <div className="flex items-start gap-2">
