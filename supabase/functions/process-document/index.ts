@@ -212,6 +212,24 @@ function getMimeType(fileName: string): string {
   return mimeMap[ext || ''] || 'application/octet-stream';
 }
 
+function formatDateToDayMonthYear(value: string): string {
+  const trimmedValue = value.trim();
+  const match = trimmedValue.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return trimmedValue;
+
+  const [, year, month, day] = match;
+  return `${day}/${month}/${year}`;
+}
+
+function normalizeExtractedBirthDate(extractedInfo: Record<string, any> | null | undefined) {
+  if (!extractedInfo || typeof extractedInfo.date_of_birth !== "string") return extractedInfo;
+
+  return {
+    ...extractedInfo,
+    date_of_birth: formatDateToDayMonthYear(extractedInfo.date_of_birth),
+  };
+}
+
 async function fetchFileAsBase64(fileUrl: string): Promise<string> {
   const response = await fetch(fileUrl);
   if (!response.ok) throw new Error(`Failed to fetch file: ${response.status}`);
@@ -481,6 +499,7 @@ serve(async (req) => {
     }
 
     // ── SA ID Structural Validation (Luhn checksum) ──
+    extracted.extracted_info = normalizeExtractedBirthDate(extracted.extracted_info);
     const idToValidate = extracted.extracted_id_number || extracted.extracted_info?.id_number;
     let saIdValidation: Record<string, any> | null = null;
 
@@ -507,7 +526,7 @@ serve(async (req) => {
       idChecks.push({
         name: "Date of Birth (YYMMDD)",
         status: dobValid ? "pass" : "fail",
-        detail: dobValid ? `Valid date of birth: ${fullYear}-${mm}-${dd}` : `Invalid date segment: ${yy}-${mm}-${dd}`,
+        detail: dobValid ? `Valid date of birth: ${dd}/${mm}/${fullYear}` : `Invalid date segment: ${yy}-${mm}-${dd}`,
       });
       if (!dobValid) idValid = false;
 
@@ -557,7 +576,7 @@ serve(async (req) => {
       saIdValidation = {
         valid: idValid,
         checks: idChecks,
-        dateOfBirth: dobValid ? `${fullYear}-${mm}-${dd}` : null,
+        dateOfBirth: dobValid ? `${dd}/${mm}/${fullYear}` : null,
         gender: derivedGender,
         citizenship: validCitizen ? (citizenDigit === "0" ? "SA Citizen" : "Permanent Resident") : null,
       };
@@ -590,7 +609,7 @@ serve(async (req) => {
         stamp_date_valid: extracted.stamp_date_valid ?? null,
         police_station: extracted.police_station || null,
         certification_authority: extracted.certification_authority || null,
-        extracted_info: extracted.extracted_info || null,
+        extracted_info: normalizeExtractedBirthDate(extracted.extracted_info) || null,
         ai_provider: aiProvider,
         sa_id_validation: saIdValidation,
       },

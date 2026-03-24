@@ -1,6 +1,7 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { format } from "date-fns";
+import { normalizeBirthDateText } from "@/lib/dateFormatting";
 
 interface ReportCandidate {
   name: string;
@@ -154,7 +155,7 @@ export function generateReport(data: ReportData) {
       doc.setFont("helvetica", "italic");
       doc.setFontSize(8);
       doc.setTextColor(...COLORS.gray);
-      const lines = doc.splitTextToSize(candidate.summary, contentWidth - 4);
+      const lines = doc.splitTextToSize(normalizeBirthDateText(candidate.summary) || "", contentWidth - 4);
       doc.text(lines, margin + 2, y + 3);
       y += lines.length * 3.5 + 4;
     }
@@ -229,7 +230,7 @@ export function generateReport(data: ReportData) {
           startY: y,
           margin: { left: margin + 2, right: margin + 2 },
           head: [["Check", "Result", "Detail"]],
-          body: d.checks.map((c) => [c.name, statusLabel(c.status), c.detail]),
+          body: d.checks.map((c) => [c.name, statusLabel(c.status), normalizeBirthDateText(c.detail) || ""]),
           theme: "grid",
           headStyles: { fillColor: COLORS.navy, textColor: COLORS.white, fontSize: 6, fontStyle: "bold", cellPadding: 1.5 },
           bodyStyles: { fontSize: 6, cellPadding: 1.5, textColor: [51, 51, 51] },

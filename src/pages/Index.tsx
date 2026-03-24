@@ -6,9 +6,10 @@ import Header from "@/components/Header";
 import SessionCard from "@/components/SessionCard";
 import UploadModal from "@/components/UploadModal";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { getSessions, deleteSession } from "@/lib/api";
+import { getSessions, deleteSession, getAllDocuments } from "@/lib/api";
 import { toast } from "sonner";
 import { format } from "date-fns";
+import { calculateValidationScore } from "@/lib/validationScore";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -29,6 +30,11 @@ const Index = () => {
   const { data: sessions = [], isLoading } = useQuery({
     queryKey: ["sessions"],
     queryFn: getSessions,
+  });
+
+  const { data: documents = [] } = useQuery({
+    queryKey: ["documents", "all"],
+    queryFn: getAllDocuments,
   });
 
   const handleSessionClick = (id: string) => {
@@ -62,13 +68,14 @@ const Index = () => {
   const totalDocs = sessions.reduce((sum, s) => sum + s.total_documents, 0);
   const processedDocs = sessions.reduce((sum, s) => sum + s.processed_documents, 0);
   const pendingDocs = totalDocs - processedDocs;
-  const successRate = totalDocs > 0 ? ((processedDocs / totalDocs) * 100).toFixed(1) : "0";
+  const allChecks = documents.flatMap((doc) => ((doc.validation_details as any)?.checks || []));
+  const successRate = calculateValidationScore(allChecks);
 
   const statCards = [
     { label: "Total Documents", value: totalDocs, icon: FileText, color: "text-purple", bgColor: "bg-purple/10" },
     { label: "Verified", value: processedDocs, icon: CheckCircle, color: "text-success", bgColor: "bg-success/10" },
     { label: "Pending", value: pendingDocs, icon: Clock, color: "text-warning", bgColor: "bg-warning/10" },
-    { label: "Success Rate", value: `${successRate}%`, icon: TrendingUp, color: "text-info", bgColor: "bg-info/10" },
+    { label: "Validation Score", value: `${successRate}%`, icon: TrendingUp, color: "text-info", bgColor: "bg-info/10" },
   ];
 
   return (
@@ -117,6 +124,13 @@ const Index = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {sessions.map((session) => (
               <div key={session.id} className="relative group">
+                {(() => {
+                  const sessionChecks = documents.flatMap((doc) =>
+                    doc.session_id === session.id ? ((doc.validation_details as any)?.checks || []) : []
+                  );
+                  const sessionScore = calculateValidationScore(sessionChecks);
+
+                  return (
                 <SessionCard
                   id={session.id}
                   name={session.name}
@@ -124,9 +138,11 @@ const Index = () => {
                   status={(session.status as "complete" | "in-progress" | "has-issues") || "in-progress"}
                   totalCandidates={session.total_documents}
                   validatedCandidates={session.processed_documents}
-                  progress={session.total_documents > 0 ? Math.round((session.processed_documents / session.total_documents) * 100) : 0}
+                  progress={sessionScore}
                   onClick={handleSessionClick}
                 />
+                  );
+                })()}
                 <button
                   onClick={(e) => handleDeleteClick(session.id, session.name, e)}
                   className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity bg-card border border-border rounded-lg p-1.5 hover:bg-destructive/10 hover:border-destructive/30"

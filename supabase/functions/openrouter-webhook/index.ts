@@ -6,6 +6,13 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+function calculateValidationScore(checks: { status: string }[] = []): number {
+  if (checks.length === 0) return 0;
+
+  const passedChecks = checks.filter((check) => check.status === "pass").length;
+  return Math.round((passedChecks / checks.length) * 100);
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -112,9 +119,11 @@ serve(async (req) => {
         .eq("candidate_name_extracted", candidateName);
 
       if (candidateDocs && candidateDocs.length > 0) {
-        const avgScore = Math.round(
-          candidateDocs.reduce((sum, d) => sum + (Number(d.confidence_score) || 0), 0) / candidateDocs.length
-        );
+        const allChecks = candidateDocs.flatMap((candidateDoc) => {
+          const details = candidateDoc.validation_details as Record<string, any> | null;
+          return Array.isArray(details?.checks) ? details.checks : [];
+        });
+        const avgScore = calculateValidationScore(allChecks);
         const hasFailure = candidateDocs.some(d => d.validation_status === "fail");
         const hasWarning = candidateDocs.some(d => d.validation_status === "warning");
         const status = hasFailure ? "fail" : hasWarning ? "warning" : "pass";

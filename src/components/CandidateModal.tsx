@@ -4,6 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
 import { toast } from "sonner";
+import { formatDateToDayMonthYear, normalizeBirthDateText } from "@/lib/dateFormatting";
 import { validateSAId } from "@/lib/saIdValidation";
 import type { CandidateData, DocumentData, DocumentCheck } from "@/components/CandidateCard";
 
@@ -89,7 +90,6 @@ const DocumentSection = ({ doc }: { doc: DocumentData }) => {
         <div className="flex items-center gap-2 min-w-0">
           <DocIcon className={`h-4 w-4 shrink-0 ${docCfg.color}`} />
           <span className="text-sm font-semibold text-foreground truncate">{doc.type}</span>
-          <span className="text-xs text-muted-foreground">({doc.confidence}%)</span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <span className={statusConfig[doc.status].badge}>{statusConfig[doc.status].label}</span>
@@ -121,7 +121,7 @@ const DocumentSection = ({ doc }: { doc: DocumentData }) => {
             )}
           </div>
 
-          {doc.summary && <p className="text-sm text-foreground">{doc.summary}</p>}
+          {doc.summary && <p className="text-sm text-foreground">{normalizeBirthDateText(doc.summary)}</p>}
 
           {/* Extracted Information */}
           {extractedInfo && Object.values(extractedInfo).some(v => v && v !== "") && (
@@ -132,7 +132,7 @@ const DocumentSection = ({ doc }: { doc: DocumentData }) => {
               <div className="space-y-1.5">
                 <InfoRow icon={User} label="Full Name" value={extractedInfo.full_name} />
                 <InfoRow icon={Hash} label="ID Number" value={extractedInfo.id_number} />
-                <InfoRow icon={Calendar} label="Date of Birth" value={extractedInfo.date_of_birth} />
+                <InfoRow icon={Calendar} label="Date of Birth" value={formatDateToDayMonthYear(extractedInfo.date_of_birth)} />
                 <InfoRow icon={User} label="Gender" value={extractedInfo.gender} />
                 <InfoRow icon={ShieldCheck} label="Nationality" value={extractedInfo.nationality} />
                 <InfoRow icon={MapPin} label="Address" value={extractedInfo.address} />
@@ -142,8 +142,8 @@ const DocumentSection = ({ doc }: { doc: DocumentData }) => {
                 <InfoRow icon={Briefcase} label="Job Title" value={extractedInfo.job_title} />
                 <InfoRow icon={GraduationCap} label="Qualification" value={extractedInfo.qualification_name} />
                 <InfoRow icon={Building} label="Institution" value={extractedInfo.institution} />
-                <InfoRow icon={Calendar} label="Issue Date" value={extractedInfo.issue_date} />
-                <InfoRow icon={Calendar} label="Expiry Date" value={extractedInfo.expiry_date} />
+                <InfoRow icon={Calendar} label="Issue Date" value={formatDateToDayMonthYear(extractedInfo.issue_date)} />
+                <InfoRow icon={Calendar} label="Expiry Date" value={formatDateToDayMonthYear(extractedInfo.expiry_date)} />
                 <InfoRow icon={Hash} label="Reference #" value={extractedInfo.reference_number} />
                 <InfoRow icon={FileText} label="Signature" value={extractedInfo.signature_present} />
                 {extractedInfo.additional_notes && (
@@ -193,7 +193,7 @@ const DocumentSection = ({ doc }: { doc: DocumentData }) => {
                       <ChkIcon className={`h-3.5 w-3.5 mt-0.5 shrink-0 ${chk.color}`} />
                       <div className="min-w-0">
                         <span className="text-xs font-medium text-foreground">{check.name}</span>
-                        <p className="text-xs text-muted-foreground">{check.detail}</p>
+                        <p className="text-xs text-muted-foreground">{normalizeBirthDateText(check.detail)}</p>
                       </div>
                     </div>
                   );
@@ -230,6 +230,9 @@ const CandidateModal = ({ candidate, open, onClose }: CandidateModalProps) => {
 
   const cfg = statusConfig[candidate.status];
   const StatusIcon = cfg.icon;
+  const secondaryLabel = candidate.idNumber !== "N/A"
+    ? `ID: ${candidate.idNumber}`
+    : candidate.primaryDocumentLabel || "Document Type: Unknown";
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -239,7 +242,7 @@ const CandidateModal = ({ candidate, open, onClose }: CandidateModalProps) => {
             <div>
               <DialogTitle className="text-xl font-bold text-foreground">{candidate.name}</DialogTitle>
               <p className="text-sm text-muted-foreground mt-0.5">
-                {candidate.idNumber !== "N/A" ? `ID: ${candidate.idNumber}` : "ID: Not extracted"}
+                {secondaryLabel}
               </p>
             </div>
             <div className="text-right">
@@ -262,7 +265,7 @@ const CandidateModal = ({ candidate, open, onClose }: CandidateModalProps) => {
                 </span>
               </p>
               {idResult.dateOfBirth && (
-                <p className="text-xs text-muted-foreground mb-1">DOB: {idResult.dateOfBirth} · Gender: {idResult.gender} · {idResult.citizenship}</p>
+                <p className="text-xs text-muted-foreground mb-1">DOB: {formatDateToDayMonthYear(idResult.dateOfBirth)} · Gender: {idResult.gender} · {idResult.citizenship}</p>
               )}
               <div className="space-y-1 mt-2">
                 {idResult.checks.map((check, i) => {
@@ -273,7 +276,7 @@ const CandidateModal = ({ candidate, open, onClose }: CandidateModalProps) => {
                       <ChkIcon className={`h-3.5 w-3.5 mt-0.5 shrink-0 ${color}`} />
                       <div>
                         <span className="text-xs font-medium text-foreground">{check.name}</span>
-                        <p className="text-xs text-muted-foreground">{check.detail}</p>
+                        <p className="text-xs text-muted-foreground">{normalizeBirthDateText(check.detail)}</p>
                       </div>
                     </div>
                   );
@@ -289,7 +292,7 @@ const CandidateModal = ({ candidate, open, onClose }: CandidateModalProps) => {
             <StatusIcon className={`h-5 w-5 mt-0.5 ${cfg.iconColor}`} />
             <div>
               <p className="text-sm font-semibold text-foreground mb-1">Overall Assessment</p>
-              <p className="text-sm text-foreground">{candidate.summary}</p>
+              <p className="text-sm text-foreground">{normalizeBirthDateText(candidate.summary)}</p>
             </div>
           </div>
         </div>

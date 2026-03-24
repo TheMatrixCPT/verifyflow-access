@@ -39,6 +39,7 @@ export interface CandidateData {
   id: string;
   name: string;
   idNumber: string;
+  primaryDocumentLabel?: string;
   score: number;
   status: "pass" | "warning" | "fail";
   documents: DocumentData[];
@@ -61,6 +62,9 @@ interface CandidateCardProps {
 const CandidateCard = ({ candidate, onClick, onDelete }: CandidateCardProps) => {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const cfg = statusConfig[candidate.status];
+  const secondaryLabel = candidate.idNumber !== "N/A"
+    ? `ID: ${candidate.idNumber.slice(0, 4)}••••${candidate.idNumber.slice(-2)}`
+    : candidate.primaryDocumentLabel || "Document Type: Unknown";
 
   return (
     <>
@@ -81,7 +85,7 @@ const CandidateCard = ({ candidate, onClick, onDelete }: CandidateCardProps) => 
           <div>
             <h3 className="text-lg font-semibold text-foreground">{candidate.name}</h3>
             <p className="text-sm text-muted-foreground mt-0.5">
-              {candidate.idNumber !== "N/A" ? `ID: ${candidate.idNumber.slice(0, 4)}••••${candidate.idNumber.slice(-2)}` : "ID: Not extracted"}
+              {secondaryLabel}
             </p>
           </div>
           <div className="text-right pr-6">

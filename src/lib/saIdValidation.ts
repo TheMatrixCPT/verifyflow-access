@@ -51,7 +51,7 @@ function isValidDate(yy: string, mm: string, dd: string): { valid: boolean; date
     date <= new Date(); // Can't be born in the future
 
   const dateStr = valid
-    ? `${fullYear}-${mm}-${dd}`
+    ? `${dd}/${mm}/${fullYear}`
     : "";
 
   return { valid, dateStr };

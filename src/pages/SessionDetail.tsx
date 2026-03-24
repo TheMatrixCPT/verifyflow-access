@@ -12,6 +12,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { generateReport } from "@/lib/generateReport";
+import { calculateValidationScore } from "@/lib/validationScore";
 import type { DocumentData, CandidateData } from "@/components/CandidateCard";
 
 type FilterType = "all" | "pass" | "warning" | "fail";
@@ -64,14 +65,14 @@ const SessionDetail = () => {
 
     // Calculate score dynamically from checks: passed / total * 100
     const allChecks = docData.flatMap((d) => d.checks || []);
-    const totalChecks = allChecks.length;
-    const passedChecks = allChecks.filter((ch) => ch.status === "pass").length;
-    const dynamicScore = totalChecks > 0 ? Math.round((passedChecks / totalChecks) * 100) : (c.score || 0);
+    const dynamicScore = allChecks.length > 0 ? calculateValidationScore(allChecks) : (c.score || 0);
+    const primaryDocumentType = docData[0]?.type;
 
     return {
       id: c.id,
       name: c.name,
       idNumber: c.id_number || "N/A",
+      primaryDocumentLabel: primaryDocumentType ? `Document Type: ${primaryDocumentType}` : "Document Type: Unknown",
       score: dynamicScore,
       status: (c.status as "pass" | "warning" | "fail") || "pass",
       documents: docData,
@@ -86,10 +87,11 @@ const SessionDetail = () => {
     return matchesSearch && matchesFilter;
   });
 
+  const sessionChecks = documents.flatMap((d) => ((d.validation_details as any)?.checks || []));
   const stats = {
     total: candidates.length,
     validated: candidates.filter((c) => c.status !== "fail").length,
-    complete: candidates.length > 0 ? Math.round((candidates.filter((c) => c.status === "pass").length / candidates.length) * 100) : 0,
+    complete: calculateValidationScore(sessionChecks),
     issues: candidates.filter((c) => c.status !== "pass").length,
   };
 

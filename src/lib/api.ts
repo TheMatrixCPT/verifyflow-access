@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { calculateValidationScore } from "@/lib/validationScore";
 
 export async function createSession(name: string): Promise<string> {
   const { data, error } = await supabase
@@ -230,9 +231,7 @@ export async function uploadAndProcessFiles(
         const details = d.validation_details as any;
         return details?.checks || [];
       });
-      const totalChecks = allChecks.length;
-      const passedChecks = allChecks.filter((c: any) => c.status === "pass").length;
-      const avgScore = totalChecks > 0 ? Math.round((passedChecks / totalChecks) * 100) : 0;
+      const avgScore = calculateValidationScore(allChecks);
       const hasFailure = candidateDocs.some((d) => d.validation_status === "fail");
       const hasWarning = candidateDocs.some((d) => d.validation_status === "warning");
       const status = hasFailure ? "fail" : hasWarning ? "warning" : "pass";
@@ -329,6 +328,14 @@ export async function getDocuments(sessionId: string, candidateId?: string) {
   let query = supabase.from("documents").select("*").eq("session_id", sessionId);
   if (candidateId) query = query.eq("candidate_id", candidateId);
   const { data, error } = await query.order("created_at", { ascending: true });
+  if (error) throw error;
+  return data;
+}
+
+export async function getAllDocuments() {
+  const { data, error } = await supabase
+    .from("documents")
+    .select("*");
   if (error) throw error;
   return data;
 }
