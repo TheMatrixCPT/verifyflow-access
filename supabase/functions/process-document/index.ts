@@ -480,6 +480,101 @@ serve(async (req) => {
       }
     }
 
+    // ── SA ID Structural Validation (Luhn checksum) ──
+    const idToValidate = extracted.extracted_id_number || extracted.extracted_info?.id_number;
+    let saIdValidation: Record<string, any> | null = null;
+
+    if (idToValidate && /^\d{13}$/.test(idToValidate.replace(/\s/g, ""))) {
+      const cleaned = idToValidate.replace(/\s/g, "");
+      const idChecks: { name: string; status: string; detail: string }[] = [];
+      let idValid = true;
+
+      // 1. Length
+      idChecks.push({ name: "ID Length (13 digits)", status: "pass", detail: "ID number contains exactly 13 digits" });
+
+      // 2. Date of birth
+      const yy = cleaned.substring(0, 2);
+      const mm = cleaned.substring(2, 4);
+      const dd = cleaned.substring(4, 6);
+      const month = parseInt(mm, 10);
+      const day = parseInt(dd, 10);
+      const yearNum = parseInt(yy, 10);
+      const currentYearSuffix = new Date().getFullYear() % 100;
+      const century = yearNum <= currentYearSuffix ? 2000 : 1900;
+      const fullYear = century + yearNum;
+      const testDate = new Date(fullYear, month - 1, day);
+      const dobValid = testDate.getFullYear() === fullYear && testDate.getMonth() === month - 1 && testDate.getDate() === day && testDate <= new Date();
+      idChecks.push({
+        name: "Date of Birth (YYMMDD)",
+        status: dobValid ? "pass" : "fail",
+        detail: dobValid ? `Valid date of birth: ${fullYear}-${mm}-${dd}` : `Invalid date segment: ${yy}-${mm}-${dd}`,
+      });
+      if (!dobValid) idValid = false;
+
+      // 3. Gender
+      const genderSeq = parseInt(cleaned.substring(6, 10), 10);
+      const derivedGender = genderSeq >= 5000 ? "Male" : "Female";
+      idChecks.push({ name: "Gender Sequence (SSSS)", status: "pass", detail: `Sequence ${cleaned.substring(6, 10)} → ${derivedGender}` });
+
+      // 4. Gender cross-check
+      const extractedGender = extracted.extracted_info?.gender;
+      if (extractedGender) {
+        const ng = extractedGender.toLowerCase().trim();
+        const genderMatch = (ng === "male" && derivedGender === "Male") || (ng === "female" && derivedGender === "Female") || (ng === "m" && derivedGender === "Male") || (ng === "f" && derivedGender === "Female");
+        idChecks.push({
+          name: "Gender Cross-Check",
+          status: genderMatch ? "pass" : "fail",
+          detail: genderMatch ? `Extracted gender matches ID-derived gender (${derivedGender})` : `Mismatch: extracted "${extractedGender}" but ID indicates ${derivedGender}`,
+        });
+        if (!genderMatch) idValid = false;
+      }
+
+      // 5. Citizenship
+      const citizenDigit = cleaned[10];
+      const validCitizen = citizenDigit === "0" || citizenDigit === "1";
+      idChecks.push({
+        name: "Citizenship Indicator",
+        status: validCitizen ? "pass" : "fail",
+        detail: validCitizen ? `Digit ${citizenDigit} → ${citizenDigit === "0" ? "SA Citizen" : "Permanent Resident"}` : `Invalid citizenship digit: ${citizenDigit}`,
+      });
+      if (!validCitizen) idValid = false;
+
+      // 6. Luhn checksum
+      let luhnSum = 0;
+      for (let i = 0; i < 13; i++) {
+        let d = parseInt(cleaned[i], 10);
+        if ((13 - i) % 2 === 0) { d *= 2; if (d > 9) d -= 9; }
+        luhnSum += d;
+      }
+      const luhnValid = luhnSum % 10 === 0;
+      idChecks.push({
+        name: "Luhn Checksum",
+        status: luhnValid ? "pass" : "fail",
+        detail: luhnValid ? "Checksum digit verified successfully" : "Checksum digit is incorrect — ID number may be invalid or misread",
+      });
+      if (!luhnValid) idValid = false;
+
+      saIdValidation = {
+        valid: idValid,
+        checks: idChecks,
+        dateOfBirth: dobValid ? `${fullYear}-${mm}-${dd}` : null,
+        gender: derivedGender,
+        citizenship: validCitizen ? (citizenDigit === "0" ? "SA Citizen" : "Permanent Resident") : null,
+      };
+
+      // Append SA ID checks to the main checks array
+      extracted.checks = [...(extracted.checks || []), ...idChecks];
+
+      if (!idValid) {
+        extracted.issues = [...(extracted.issues || []), "SA ID number failed structural validation"];
+        if (extracted.validation_status === "pass") {
+          extracted.validation_status = "warning";
+        }
+      }
+
+      console.log(`SA ID validation for ${cleaned}: ${idValid ? "PASS" : "FAIL"}`);
+    }
+
     // Update document with AI results
     await supabase.from("documents").update({
       document_type: extracted.document_type,
@@ -497,6 +592,7 @@ serve(async (req) => {
         certification_authority: extracted.certification_authority || null,
         extracted_info: extracted.extracted_info || null,
         ai_provider: aiProvider,
+        sa_id_validation: saIdValidation,
       },
       processed_at: new Date().toISOString(),
     }).eq("id", document_id);
