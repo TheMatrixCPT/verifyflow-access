@@ -10,6 +10,71 @@ export async function createSession(name: string): Promise<string> {
   return data.id;
 }
 
+export async function checkCrossCohortCandidates(
+  currentSessionId: string | undefined,
+  fileNames: string[]
+): Promise<{ candidateName: string; existingSessionName: string; existingSessionId: string }[]> {
+  // Extract candidate names from file names (remove extension, normalize)
+  const extractedNames = fileNames.map(fn => {
+    const withoutExt = fn.replace(/\.[^.]+$/, '');
+    // Remove common document type suffixes
+    const cleaned = withoutExt
+      .replace(/[-_](id|contract|eea1|affidavit|attendance|cv|resume|certificate|clearance|qualification|proof|tax|bank|medical|reference|letter|statement)/gi, '')
+      .replace(/[-_]\d+$/, '')
+      .trim();
+    return cleaned.toLowerCase().replace(/[^a-z\s]/g, '').split(/\s+/).filter(Boolean).sort().join(' ');
+  }).filter(n => n.length > 0);
+
+  if (extractedNames.length === 0) return [];
+
+  // Get all candidates from other sessions
+  const { data: allCandidates } = await supabase
+    .from("candidates")
+    .select("name, session_id");
+
+  if (!allCandidates) return [];
+
+  // Get session names
+  const sessionIds = [...new Set(allCandidates.filter(c => c.session_id !== currentSessionId).map(c => c.session_id))];
+  if (sessionIds.length === 0) return [];
+
+  const { data: sessions } = await supabase
+    .from("sessions")
+    .select("id, name")
+    .in("id", sessionIds);
+
+  const sessionMap = new Map(sessions?.map(s => [s.id, s.name]) || []);
+
+  const matches: { candidateName: string; existingSessionName: string; existingSessionId: string }[] = [];
+  const seen = new Set<string>();
+
+  for (const candidate of allCandidates) {
+    if (candidate.session_id === currentSessionId) continue;
+    const normalizedCandidate = candidate.name.toLowerCase().replace(/[^a-z\s]/g, '').split(/\s+/).filter(Boolean).sort().join(' ');
+    
+    for (const extractedName of extractedNames) {
+      // Check if any parts match (at least first + last name)
+      const extractedParts = extractedName.split(' ');
+      const candidateParts = normalizedCandidate.split(' ');
+      const matchingParts = extractedParts.filter(p => candidateParts.includes(p));
+      
+      if (matchingParts.length >= 2 || (matchingParts.length === 1 && extractedParts.length === 1 && candidateParts.length === 1)) {
+        const key = `${normalizedCandidate}-${candidate.session_id}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          matches.push({
+            candidateName: candidate.name,
+            existingSessionName: sessionMap.get(candidate.session_id) || "Unknown Session",
+            existingSessionId: candidate.session_id,
+          });
+        }
+      }
+    }
+  }
+
+  return matches;
+}
+
 export async function checkDuplicateFiles(sessionId: string, fileNames: string[]): Promise<{ fileName: string; existingUploadedAt: string }[]> {
   const { data: existingDocs } = await supabase
     .from("documents")
