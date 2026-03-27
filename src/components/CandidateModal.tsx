@@ -246,6 +246,7 @@ const CandidateModal = ({ candidate, open, onClose, onReplaceDocument }: Candida
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
+          <DialogDescription className="sr-only">Candidate validation details and document review</DialogDescription>
           <div className="flex items-center justify-between pr-6">
             <div>
               <DialogTitle className="text-xl font-bold text-foreground">{candidate.name}</DialogTitle>
