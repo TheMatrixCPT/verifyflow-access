@@ -1,7 +1,15 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { X, Upload, FileText, Loader2, AlertTriangle, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { createSession, uploadAndProcessFiles, checkDuplicateFiles, checkCrossCohortCandidates } from "@/lib/api";
+import {
+  createSession,
+  uploadAndProcessFiles,
+  checkDuplicateFiles,
+  checkCrossCohortCandidates,
+  checkSessionUploadConflicts,
+  type UploadConflict,
+  type UploadFileInstruction,
+} from "@/lib/api";
 import { toast } from "sonner";
 import {
   AlertDialog,
@@ -19,6 +27,13 @@ interface UploadModalProps {
   onClose: () => void;
   onComplete: (sessionId: string) => void;
   existingSessionId?: string;
+  replacementTarget?: {
+    candidateId: string;
+    candidateName: string;
+    documentId: string;
+    documentType: string;
+    fileName: string;
+  } | null;
 }
 
 interface DuplicateInfo {
@@ -32,7 +47,7 @@ interface CrossCohortMatch {
   existingSessionId: string;
 }
 
-const UploadModal = ({ open, onClose, onComplete, existingSessionId }: UploadModalProps) => {
+const UploadModal = ({ open, onClose, onComplete, existingSessionId, replacementTarget }: UploadModalProps) => {
   const [sessionName, setSessionName] = useState("");
   const [sessionNameError, setSessionNameError] = useState("");
   const [files, setFiles] = useState<File[]>([]);
@@ -40,27 +55,67 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId }: UploadMod
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState({ processed: 0, total: 0 });
   const [duplicates, setDuplicates] = useState<DuplicateInfo[]>([]);
+  const [uploadConflicts, setUploadConflicts] = useState<UploadConflict[]>([]);
   const [showDuplicateDialog, setShowDuplicateDialog] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [pendingInstructions, setPendingInstructions] = useState<UploadFileInstruction[]>([]);
   const [crossCohortMatches, setCrossCohortMatches] = useState<CrossCohortMatch[]>([]);
   const [showCrossCohortDialog, setShowCrossCohortDialog] = useState(false);
   const [pendingReplaceFlag, setPendingReplaceFlag] = useState(false);
+
+  useEffect(() => {
+    if (replacementTarget) {
+      setFiles([]);
+      setPendingFiles([]);
+      setPendingInstructions([]);
+      setDuplicates([]);
+      setUploadConflicts([]);
+      setShowDuplicateDialog(false);
+    }
+  }, [replacementTarget]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
     const droppedFiles = Array.from(e.dataTransfer.files);
-    setFiles((prev) => [...prev, ...droppedFiles]);
-  }, []);
+    setFiles((prev) => replacementTarget ? droppedFiles.slice(0, 1) : [...prev, ...droppedFiles]);
+  }, [replacementTarget]);
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      setFiles((prev) => [...prev, ...Array.from(e.target.files!)]);
+      const selectedFiles = Array.from(e.target.files!);
+      setFiles((prev) => replacementTarget ? selectedFiles.slice(0, 1) : [...prev, ...selectedFiles]);
     }
   };
 
   const removeFile = (index: number) => {
     setFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const buildInstructions = (filesToProcess: File[], replaceExisting: boolean): UploadFileInstruction[] => {
+    if (replacementTarget) {
+      const firstFile = filesToProcess[0];
+      if (!firstFile) return [];
+
+      return [{
+        file: firstFile,
+        targetCandidateId: replacementTarget.candidateId,
+        replacementDocumentId: replacementTarget.documentId,
+        inferredDocumentType: replacementTarget.documentType,
+        matchedCandidateName: replacementTarget.candidateName,
+      }];
+    }
+
+    return filesToProcess.map((file) => {
+      const conflict = uploadConflicts.find((item) => item.fileName === file.name);
+      return {
+        file,
+        targetCandidateId: conflict?.candidateId,
+        replacementDocumentId: replaceExisting ? conflict?.existingDocumentId : undefined,
+        inferredDocumentType: conflict?.inferredDocumentType,
+        matchedCandidateName: conflict?.candidateName,
+      };
+    });
   };
 
   const processFiles = async (filesToProcess: File[], replaceExisting: boolean) => {
@@ -82,7 +137,8 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId }: UploadMod
         sessionId = await createSession(sessionName.trim());
       }
 
-      await uploadAndProcessFiles(sessionId, filesToProcess, (processed, total) => {
+      const instructions = pendingInstructions.length > 0 ? pendingInstructions : buildInstructions(filesToProcess, replaceExisting);
+      await uploadAndProcessFiles(sessionId, instructions, (processed, total) => {
         setProgress({ processed, total });
       }, replaceExisting);
 
@@ -91,7 +147,9 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId }: UploadMod
       setSessionNameError("");
       setFiles([]);
       setPendingFiles([]);
+      setPendingInstructions([]);
       setDuplicates([]);
+      setUploadConflicts([]);
       setCrossCohortMatches([]);
       setIsProcessing(false);
       setProgress({ processed: 0, total: 0 });
@@ -104,6 +162,11 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId }: UploadMod
   };
 
   const proceedAfterCrossCohortCheck = async (filesToProcess: File[], replaceExisting: boolean) => {
+    if (replacementTarget) {
+      await processFiles(filesToProcess, replaceExisting);
+      return;
+    }
+
     // Check cross-cohort candidates
     const matches = await checkCrossCohortCandidates(
       existingSessionId,
@@ -113,6 +176,7 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId }: UploadMod
     if (matches.length > 0) {
       setCrossCohortMatches(matches);
       setPendingFiles(filesToProcess);
+      setPendingInstructions(buildInstructions(filesToProcess, replaceExisting));
       setPendingReplaceFlag(replaceExisting);
       setShowCrossCohortDialog(true);
       return;
@@ -132,28 +196,53 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId }: UploadMod
     setSessionNameError("");
 
     // Check for duplicates if uploading to existing session
+    if (replacementTarget) {
+      if (files.length > 1) {
+        toast.error("Please upload one replacement document at a time.");
+        return;
+      }
+      setPendingInstructions(buildInstructions(files, true));
+      await proceedAfterCrossCohortCheck(files, true);
+      return;
+    }
+
     if (existingSessionId) {
+      const conflicts = await checkSessionUploadConflicts(existingSessionId, files);
+      setUploadConflicts(conflicts);
+
       const fileNames = files.map(f => f.name);
       const dupes = await checkDuplicateFiles(existingSessionId, fileNames);
+      const typeConflicts = conflicts
+        .filter((conflict) => conflict.existingDocumentId)
+        .map((conflict) => ({
+          fileName: conflict.fileName,
+          existingUploadedAt: conflict.existingUploadedAt || "",
+        }));
 
-      if (dupes.length > 0) {
-        setDuplicates(dupes);
+      if (dupes.length > 0 || typeConflicts.length > 0) {
+        setDuplicates([...dupes, ...typeConflicts.filter((conflict) => !dupes.some((dupe) => dupe.fileName === conflict.fileName))]);
         setPendingFiles(files);
+        setPendingInstructions(buildInstructions(files, false));
         setShowDuplicateDialog(true);
         return;
       }
+    } else {
+      setUploadConflicts([]);
     }
 
+    setPendingInstructions(buildInstructions(files, false));
     await proceedAfterCrossCohortCheck(files, false);
   };
 
   const handleReplace = () => {
     setShowDuplicateDialog(false);
+    setPendingInstructions(buildInstructions(pendingFiles, true));
     proceedAfterCrossCohortCheck(pendingFiles, true);
   };
 
   const handleKeepBoth = () => {
     setShowDuplicateDialog(false);
+    setPendingInstructions(buildInstructions(pendingFiles, false));
     proceedAfterCrossCohortCheck(pendingFiles, false);
   };
 
@@ -165,6 +254,7 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId }: UploadMod
   const handleCrossCohortCancel = () => {
     setShowCrossCohortDialog(false);
     setPendingFiles([]);
+    setPendingInstructions([]);
     setCrossCohortMatches([]);
     setPendingReplaceFlag(false);
   };
@@ -190,8 +280,8 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId }: UploadMod
                   <AlertTriangle className="h-5 w-5 text-warning" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-bold text-space-kadet">Duplicate Documents Found</h2>
-                  <p className="text-sm text-muted-foreground">{duplicates.length} file{duplicates.length !== 1 ? "s" : ""} already exist in this session</p>
+                  <h2 className="text-xl font-bold text-space-kadet">Existing Documents Found</h2>
+                  <p className="text-sm text-muted-foreground">{duplicates.length} file{duplicates.length !== 1 ? "s" : ""} match existing candidate documents in this session</p>
                 </div>
               </div>
 
@@ -204,6 +294,12 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId }: UploadMod
                       <p className="text-xs text-muted-foreground">
                         Already uploaded on {new Date(d.existingUploadedAt).toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
                       </p>
+                      {uploadConflicts.find((conflict) => conflict.fileName === d.fileName)?.candidateName && (
+                        <p className="text-xs text-muted-foreground">
+                          Candidate: <span className="font-medium text-foreground">{uploadConflicts.find((conflict) => conflict.fileName === d.fileName)?.candidateName}</span>
+                          {uploadConflicts.find((conflict) => conflict.fileName === d.fileName)?.inferredDocumentType ? ` • Type: ${uploadConflicts.find((conflict) => conflict.fileName === d.fileName)?.inferredDocumentType}` : ""}
+                        </p>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -211,7 +307,7 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId }: UploadMod
 
               <div className="flex flex-col gap-3 pt-4 border-t border-border">
                 <Button variant="default" onClick={handleReplace} className="w-full">
-                  Replace Existing Documents
+                  Replace Matching Documents
                 </Button>
                 <Button variant="secondary" onClick={handleKeepBoth} className="w-full">
                   Keep Both Versions
@@ -247,11 +343,20 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId }: UploadMod
           {!isProcessing && !showDuplicateDialog && (
             <>
               <div className="flex items-center justify-between pb-6 mb-6 border-b border-border">
-                <h2 className="text-2xl font-bold text-space-kadet">Upload Documents</h2>
+                <h2 className="text-2xl font-bold text-space-kadet">{replacementTarget ? "Re-upload Failed Document" : "Upload Documents"}</h2>
                 <Button variant="icon" size="icon" onClick={onClose}>
                   <X className="h-5 w-5" />
                 </Button>
               </div>
+
+              {replacementTarget && (
+                <div className="mb-6 rounded-lg border border-warning/30 bg-warning/5 p-4">
+                  <p className="text-sm font-semibold text-foreground">{replacementTarget.candidateName}</p>
+                  <p className="text-sm text-muted-foreground">
+                    Replace: {replacementTarget.documentType} ({replacementTarget.fileName})
+                  </p>
+                </div>
+              )}
 
               {!existingSessionId && (
                 <div className="mb-6">
@@ -284,11 +389,11 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId }: UploadMod
                 onClick={() => document.getElementById("file-input")?.click()}
               >
                 <Upload className="h-16 w-16 text-purple mb-4" />
-                <h3 className="text-lg font-semibold text-space-kadet mb-1">Drop all candidate documents here</h3>
-                <p className="text-muted-foreground text-sm mb-2">Or click to browse and select multiple files</p>
+                <h3 className="text-lg font-semibold text-space-kadet mb-1">{replacementTarget ? "Drop the corrected document here" : "Drop all candidate documents here"}</h3>
+                <p className="text-muted-foreground text-sm mb-2">{replacementTarget ? "Or click to browse and select one replacement file" : "Or click to browse and select multiple files"}</p>
                 <p className="text-muted-foreground text-[13px]">PDF, JPG, JPEG, PNG up to 10MB each</p>
                 <p className="text-purple text-sm font-semibold mt-2">AI auto-detects document type and candidate name</p>
-                <input id="file-input" type="file" multiple accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={handleFileInput} />
+                <input id="file-input" type="file" multiple={!replacementTarget} accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={handleFileInput} />
               </div>
 
               {files.length > 0 && (

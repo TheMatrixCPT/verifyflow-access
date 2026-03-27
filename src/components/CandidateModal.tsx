@@ -1,12 +1,11 @@
 import { useState } from "react";
-import { CheckCircle, AlertTriangle, XCircle, FileText, Eye, ExternalLink, Clock, Loader2, ChevronDown, User, Hash, Calendar, MapPin, Phone, Mail, Briefcase, GraduationCap, Building, ShieldCheck, Fingerprint } from "lucide-react";
+import { CheckCircle, AlertTriangle, XCircle, FileText, Eye, ExternalLink, Clock, Loader2, ChevronDown, User, Hash, Calendar, MapPin, Phone, Mail, Briefcase, GraduationCap, Building, ShieldCheck, Upload } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { formatDateToDayMonthYear, normalizeBirthDateText } from "@/lib/dateFormatting";
-import { validateSAId } from "@/lib/saIdValidation";
-import type { CandidateData, DocumentData, DocumentCheck } from "@/components/CandidateCard";
+import type { CandidateData, DocumentData } from "@/components/CandidateCard";
 
 const statusConfig = {
   pass: { badge: "vf-badge-success", label: "Pass", icon: CheckCircle, iconColor: "text-success" },
@@ -31,7 +30,10 @@ interface ExtractedInfo {
   id_number?: string;
   date_of_birth?: string;
   gender?: string;
+  race?: string;
   nationality?: string;
+  foreign_national?: boolean;
+  foreign_national_support_date?: string;
   address?: string;
   phone_number?: string;
   email?: string;
@@ -47,7 +49,7 @@ interface ExtractedInfo {
 }
 
 const InfoRow = ({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value?: string | boolean | null }) => {
-  if (!value || value === "") return null;
+  if (value === undefined || value === null || value === "") return null;
   return (
     <div className="flex items-start gap-2 text-sm">
       <Icon className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
@@ -57,7 +59,7 @@ const InfoRow = ({ icon: Icon, label, value }: { icon: React.ElementType; label:
   );
 };
 
-const DocumentSection = ({ doc }: { doc: DocumentData }) => {
+const DocumentSection = ({ doc, onReplaceDocument }: { doc: DocumentData; onReplaceDocument?: (doc: DocumentData) => void }) => {
   const [expanded, setExpanded] = useState(false);
   const [viewingDoc, setViewingDoc] = useState(false);
   const docCfg = docStatusIcon[doc.status];
@@ -93,6 +95,15 @@ const DocumentSection = ({ doc }: { doc: DocumentData }) => {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <span className={statusConfig[doc.status].badge}>{statusConfig[doc.status].label}</span>
+          {doc.status === "fail" && onReplaceDocument && (
+            <button
+              className="text-xs font-medium text-destructive hover:text-destructive/80 underline flex items-center gap-0.5"
+              onClick={(e) => { e.stopPropagation(); onReplaceDocument(doc); }}
+            >
+              <Upload className="h-3 w-3" />
+              Re-upload
+            </button>
+          )}
           {doc.filePath && (
             <button
               className="text-xs font-medium text-primary hover:text-primary/80 underline flex items-center gap-0.5"
@@ -123,8 +134,7 @@ const DocumentSection = ({ doc }: { doc: DocumentData }) => {
 
           {doc.summary && <p className="text-sm text-foreground">{normalizeBirthDateText(doc.summary)}</p>}
 
-          {/* Extracted Information */}
-          {extractedInfo && Object.values(extractedInfo).some(v => v && v !== "") && (
+          {extractedInfo && Object.values(extractedInfo).some((value) => value && value !== "") && (
             <div className="bg-card rounded-md border border-border p-3">
               <p className="text-xs font-semibold text-foreground mb-2 flex items-center gap-1.5">
                 <FileText className="h-3.5 w-3.5" /> Extracted Information
@@ -134,7 +144,10 @@ const DocumentSection = ({ doc }: { doc: DocumentData }) => {
                 <InfoRow icon={Hash} label="ID Number" value={extractedInfo.id_number} />
                 <InfoRow icon={Calendar} label="Date of Birth" value={formatDateToDayMonthYear(extractedInfo.date_of_birth)} />
                 <InfoRow icon={User} label="Gender" value={extractedInfo.gender} />
+                <InfoRow icon={Hash} label="Race" value={extractedInfo.race} />
                 <InfoRow icon={ShieldCheck} label="Nationality" value={extractedInfo.nationality} />
+                <InfoRow icon={ShieldCheck} label="Foreign National" value={extractedInfo.foreign_national} />
+                <InfoRow icon={Calendar} label="Foreign National Date" value={formatDateToDayMonthYear(extractedInfo.foreign_national_support_date)} />
                 <InfoRow icon={MapPin} label="Address" value={extractedInfo.address} />
                 <InfoRow icon={Phone} label="Phone" value={extractedInfo.phone_number} />
                 <InfoRow icon={Mail} label="Email" value={extractedInfo.email} />
@@ -153,7 +166,6 @@ const DocumentSection = ({ doc }: { doc: DocumentData }) => {
             </div>
           )}
 
-          {/* Stamp / Certification Info */}
           {(doc.stampDate || doc.policeStation || doc.certificationAuthority) && (
             <div className="bg-card rounded-md border border-border p-3">
               <p className="text-xs font-semibold text-foreground mb-2 flex items-center gap-1.5">
@@ -178,19 +190,18 @@ const DocumentSection = ({ doc }: { doc: DocumentData }) => {
             </div>
           )}
 
-          {/* Validation Checks */}
           {doc.checks && doc.checks.length > 0 && (
             <div className="bg-card rounded-md border border-border overflow-hidden">
               <p className="text-xs font-semibold text-foreground px-3 py-1.5 bg-muted border-b border-border">
                 Validation Checks
               </p>
               <div className="divide-y divide-border">
-                {doc.checks.map((check, j) => {
-                  const chk = checkStatusIcon[check.status as keyof typeof checkStatusIcon] || checkStatusIcon.warning;
-                  const ChkIcon = chk.icon;
+                {doc.checks.map((check, index) => {
+                  const checkConfig = checkStatusIcon[check.status as keyof typeof checkStatusIcon] || checkStatusIcon.warning;
+                  const CheckIcon = checkConfig.icon;
                   return (
-                    <div key={j} className="flex items-start gap-2 px-3 py-2">
-                      <ChkIcon className={`h-3.5 w-3.5 mt-0.5 shrink-0 ${chk.color}`} />
+                    <div key={index} className="flex items-start gap-2 px-3 py-2">
+                      <CheckIcon className={`h-3.5 w-3.5 mt-0.5 shrink-0 ${checkConfig.color}`} />
                       <div className="min-w-0">
                         <span className="text-xs font-medium text-foreground">{check.name}</span>
                         <p className="text-xs text-muted-foreground">{normalizeBirthDateText(check.detail)}</p>
@@ -202,11 +213,10 @@ const DocumentSection = ({ doc }: { doc: DocumentData }) => {
             </div>
           )}
 
-          {/* Issues */}
           {doc.issues && doc.issues.length > 0 && (
             <div className="space-y-1">
-              {doc.issues.map((issue, j) => (
-                <div key={j} className="flex items-start gap-1.5 text-sm text-destructive">
+              {doc.issues.map((issue, index) => (
+                <div key={index} className="flex items-start gap-1.5 text-sm text-destructive">
                   <XCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
                   <span>{issue}</span>
                 </div>
@@ -223,19 +233,17 @@ interface CandidateModalProps {
   candidate: CandidateData | null;
   open: boolean;
   onClose: () => void;
+  onReplaceDocument?: (candidate: CandidateData, doc: DocumentData) => void;
 }
 
-const CandidateModal = ({ candidate, open, onClose }: CandidateModalProps) => {
+const CandidateModal = ({ candidate, open, onClose, onReplaceDocument }: CandidateModalProps) => {
   if (!candidate) return null;
 
   const cfg = statusConfig[candidate.status];
-  const StatusIcon = cfg.icon;
-  const secondaryLabel = candidate.idNumber !== "N/A"
-    ? `ID: ${candidate.idNumber}`
-    : candidate.primaryDocumentLabel || "Document Type: Unknown";
+  const secondaryLabel = candidate.primaryDocumentLabel || "Document Type: Unknown";
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+    <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <div className="flex items-center justify-between pr-6">
@@ -252,52 +260,6 @@ const CandidateModal = ({ candidate, open, onClose }: CandidateModalProps) => {
           </div>
         </DialogHeader>
 
-        {/* SA ID Structural Validation */}
-        {candidate.idNumber && candidate.idNumber !== "N/A" && (() => {
-          const idResult = validateSAId(candidate.idNumber);
-          return (
-            <div className={`rounded-lg border p-4 ${idResult.valid ? "border-success/30 bg-success/5" : "border-destructive/30 bg-destructive/5"}`}>
-              <p className="text-sm font-semibold text-foreground mb-2 flex items-center gap-1.5">
-                <Fingerprint className="h-4 w-4" />
-                SA ID Structural Validation
-                <span className={idResult.valid ? "vf-badge-success" : "vf-badge-error"}>
-                  {idResult.valid ? "Valid" : "Invalid"}
-                </span>
-              </p>
-              {idResult.dateOfBirth && (
-                <p className="text-xs text-muted-foreground mb-1">DOB: {formatDateToDayMonthYear(idResult.dateOfBirth)} · Gender: {idResult.gender} · {idResult.citizenship}</p>
-              )}
-              <div className="space-y-1 mt-2">
-                {idResult.checks.map((check, i) => {
-                  const ChkIcon = check.status === "pass" ? CheckCircle : XCircle;
-                  const color = check.status === "pass" ? "text-success" : "text-error";
-                  return (
-                    <div key={i} className="flex items-start gap-2">
-                      <ChkIcon className={`h-3.5 w-3.5 mt-0.5 shrink-0 ${color}`} />
-                      <div>
-                        <span className="text-xs font-medium text-foreground">{check.name}</span>
-                        <p className="text-xs text-muted-foreground">{normalizeBirthDateText(check.detail)}</p>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })()}
-
-        {/* Overall Assessment */}
-        <div className="bg-muted rounded-lg p-4">
-          <div className="flex items-start gap-2">
-            <StatusIcon className={`h-5 w-5 mt-0.5 ${cfg.iconColor}`} />
-            <div>
-              <p className="text-sm font-semibold text-foreground mb-1">Overall Assessment</p>
-              <p className="text-sm text-foreground">{normalizeBirthDateText(candidate.summary)}</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Issues Summary */}
         {candidate.issues && candidate.issues.length > 0 && (
           <div className="bg-destructive/5 border border-destructive/20 rounded-lg p-4">
             <p className="text-sm font-semibold text-destructive mb-2 flex items-center gap-1.5">
@@ -305,8 +267,8 @@ const CandidateModal = ({ candidate, open, onClose }: CandidateModalProps) => {
               Issues Found ({candidate.issues.length})
             </p>
             <ul className="space-y-1">
-              {candidate.issues.map((issue, i) => (
-                <li key={i} className="flex items-start gap-1.5 text-sm text-foreground">
+              {candidate.issues.map((issue, index) => (
+                <li key={index} className="flex items-start gap-1.5 text-sm text-foreground">
                   <span className="text-destructive mt-1.5">•</span>
                   <span>{issue}</span>
                 </li>
@@ -315,15 +277,18 @@ const CandidateModal = ({ candidate, open, onClose }: CandidateModalProps) => {
           </div>
         )}
 
-        {/* Documents */}
         <div>
           <p className="text-sm font-semibold text-foreground mb-3 flex items-center gap-1.5">
             <FileText className="h-4 w-4" />
             Documents ({candidate.documents.length})
           </p>
           <div className="space-y-2">
-            {candidate.documents.map((doc, i) => (
-              <DocumentSection key={i} doc={doc} />
+            {candidate.documents.map((doc, index) => (
+              <DocumentSection
+                key={index}
+                doc={doc}
+                onReplaceDocument={onReplaceDocument ? (selectedDoc) => onReplaceDocument(candidate, selectedDoc) : undefined}
+              />
             ))}
           </div>
         </div>

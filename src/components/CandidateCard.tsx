@@ -18,6 +18,8 @@ export interface DocumentCheck {
 }
 
 export interface DocumentData {
+  id?: string;
+  candidateId?: string;
   type: string;
   status: "pass" | "warning" | "fail";
   fileName: string;
@@ -62,9 +64,7 @@ interface CandidateCardProps {
 const CandidateCard = ({ candidate, onClick, onDelete }: CandidateCardProps) => {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const cfg = statusConfig[candidate.status];
-  const secondaryLabel = candidate.idNumber !== "N/A"
-    ? `ID: ${candidate.idNumber.slice(0, 4)}••••${candidate.idNumber.slice(-2)}`
-    : candidate.primaryDocumentLabel || "Document Type: Unknown";
+  const secondaryLabel = candidate.primaryDocumentLabel || "Document Type: Unknown";
 
   return (
     <>

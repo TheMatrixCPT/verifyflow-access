@@ -18,7 +18,7 @@ const statusConfig = {
 };
 
 const SessionCard = ({ id, name, timestamp, status, totalCandidates, validatedCandidates, progress, onClick }: SessionCardProps) => {
-  const statusCfg = statusConfig[status];
+  const statusCfg = statusConfig[status] || statusConfig["in-progress"];
   const StatusIcon = statusCfg.icon;
 
   return (

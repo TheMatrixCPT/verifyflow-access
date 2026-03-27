@@ -37,6 +37,12 @@ const Index = () => {
     queryFn: getAllDocuments,
   });
 
+  const normalizeSessionStatus = (status: string | null | undefined): "complete" | "in-progress" | "has-issues" => {
+    if (status === "complete" || status === "has-issues") return status;
+    if (status === "pending" || status === "processing" || status === "in-progress") return "in-progress";
+    return "in-progress";
+  };
+
   const handleSessionClick = (id: string) => {
     navigate(`/session/${id}`);
   };
@@ -135,7 +141,7 @@ const Index = () => {
                   id={session.id}
                   name={session.name}
                   timestamp={format(new Date(session.created_at), "MMM d, yyyy 'at' HH:mm")}
-                  status={(session.status as "complete" | "in-progress" | "has-issues") || "in-progress"}
+                  status={normalizeSessionStatus(session.status)}
                   totalCandidates={session.total_documents}
                   validatedCandidates={session.processed_documents}
                   progress={sessionScore}

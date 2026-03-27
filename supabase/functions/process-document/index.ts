@@ -6,6 +6,12 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+type CrossReferenceContext = {
+  available: boolean;
+  candidateName: string | null;
+  idNumber: string | null;
+};
+
 const toolSchema = {
   type: "function",
   function: {
@@ -20,7 +26,7 @@ const toolSchema = {
             "ID Document", "Signed Contract", "EEA1 Form", "Affidavit",
             "Attendance Register", "Qualification", "Proof of Address",
             "Tax Certificate", "Police Clearance", "CV/Resume",
-            "Reference Letter", "Medical Certificate", "Bank Statement",
+            "Reference Letter", "Medical Certificate", "Disability Document", "Bank Statement",
             "Employment Contract", "Other"
           ],
           description: "The type of HR document"
@@ -55,7 +61,10 @@ const toolSchema = {
             id_number: { type: "string", description: "ID number if present" },
             date_of_birth: { type: "string", description: "Date of birth if present" },
             gender: { type: "string", description: "Gender if present" },
+            race: { type: "string", description: "Race selected on the employment equity form if present" },
             nationality: { type: "string", description: "Nationality or citizenship status" },
+            foreign_national: { type: "boolean", description: "Whether the form indicates the person is a foreign national" },
+            foreign_national_support_date: { type: "string", description: "Acquired date, residence date, or permit-related date required when foreign national is marked yes" },
             address: { type: "string", description: "Physical address if present" },
             phone_number: { type: "string", description: "Phone number if present" },
             email: { type: "string", description: "Email address if present" },
@@ -77,7 +86,12 @@ const toolSchema = {
   }
 };
 
-function buildSystemPrompt(confidenceThreshold: number, stampValidityMonths: number, strictMode: boolean): string {
+function buildSystemPrompt(
+  confidenceThreshold: number,
+  stampValidityMonths: number,
+  strictMode: boolean,
+  crossReferenceContext: CrossReferenceContext,
+): string {
   const today = new Date().toISOString().split("T")[0];
   return `You are a South African HR document validation AI for CapaCiTi / Capaciti training programme compliance.
 Your job is to validate uploaded candidate documents against strict rules. You do NOT approve candidates — you flag issues clearly so a human admin can make the final decision.
@@ -88,6 +102,17 @@ GLOBAL SETTINGS:
 - Minimum confidence to pass: ${confidenceThreshold}%
 - ID certification stamp must be within ${stampValidityMonths} months
 - Strict mode: ${strictMode ? "ENABLED — flag any ambiguity, apply strictest interpretation" : "DISABLED — standard validation"}
+
+CANDIDATE ID CROSS-REFERENCE CONTEXT:
+${crossReferenceContext.available
+  ? `- Cross-reference is AVAILABLE for this document
+- Candidate name from uploaded ID context: ${crossReferenceContext.candidateName || "Unknown"}
+- Candidate ID number from uploaded ID context: ${crossReferenceContext.idNumber || "Unknown"}
+- Use this uploaded ID context only when a document type requires matching the candidate's ID number`
+  : `- Cross-reference is NOT available for this document
+- Do NOT perform any "matches candidate's ID document" validation
+- Do NOT add a fail, warning, or issue just because no candidate ID document is available
+- Validate the current document on its own contents only`}
 
 DOCUMENT TYPES AND THEIR SPECIFIC VALIDATION RULES:
 
@@ -108,10 +133,20 @@ Required checks (each must be reported as pass/fail):
 
 ═══ 2. SIGNED CONTRACT ═══
 Required checks:
-- Signature present at the end of the document
-- Date present at the end of the document
+- Review ALL pages before deciding whether a signature or date is missing
+- Multi-page contracts are common: inspect every page from first to last before deciding a signature or date is missing
+- Signature pages may appear near the end, on a dedicated acceptance page, or on separate employer/employee signature pages
+- Signature present on the relevant signature page
+- Date present at the end of the document or on the relevant signature page
 - ID number present in the contract
-- ID number matches the candidate's ID document (cross-reference if available)
+- ID number matches the candidate's ID document only when uploaded ID context is explicitly available above
+- Do NOT fail a contract because a personal-details page or non-signature page does not contain a signature
+- If the contract has dedicated signature pages later in the document, use those pages for the signature check
+- Page 10 employee details is an information page and does NOT require the employee's or employer's signature
+- Some contracts require only the employee signature, while others require both employee and employer signatures
+- Determine from the contract wording and signature blocks whether employee only or both parties are required
+- Do NOT fail the contract for a missing employer signature if the contract only requires the employee
+- Extract the actual signature/date findings from the correct signature page instead of earlier information pages
 
 ═══ 3. EEA1 FORM (Employment Equity Act) ═══
 Required checks:
@@ -119,17 +154,25 @@ Required checks:
 - Text is legible
 - Signature present
 - Date present
-- CRITICAL: Check whether "South African" or "Foreigner" is ticked
-  → If "Foreigner" is ticked → REJECT (status: fail)
-  → If neither is ticked (left blank) → REJECT (status: fail)
-  → If "South African" is ticked → PASS this check
+- Extract the selected race category when present and store it in extracted_info.race
+- CRITICAL: Check the foreign-national answer, even if the form uses different wording
+  → For nationality on this form, the answer is captured as "Yes" or "No"
+  → "No" means the person is South African
+  → "Yes" means the person is a foreign national and must provide the acquired date of nationality / residence
+  → Some forms may also use "South African" vs "Foreigner", but prefer the explicit Yes / No answer when present
+  → Normalize the result into extracted_info.foreign_national as true or false
+  → If the answer is "Yes" → mark extracted_info.foreign_national as true
+  → If the answer is "No" → mark extracted_info.foreign_national as false
+  → If foreign national is true, look for the acquired date of nationality, residence date, or permit-related date and store it in extracted_info.foreign_national_support_date
+  → If foreign national is true and the required acquired / residence / permit date is missing → REJECT (status: fail)
+  → If the field is contradictory or unreadable → REJECT (status: fail)
 
 ═══ 4. AFFIDAVIT ═══
 Required checks:
 - Document is signed
 - Document is dated
 - ID number is present
-- ID number matches the candidate's ID document
+- ID number matches the candidate's ID document only when uploaded ID context is explicitly available above
 - Commissioner of Oaths stamp present — identify the police station or commissioner
 - Stamp date present and valid (within ${stampValidityMonths} months)
 - Follows standard Capaciti affidavit format
@@ -163,24 +206,52 @@ Required checks:
 - If certified: identify the certifying authority (police station or commissioner)
 - Stamp date validity (within ${stampValidityMonths} months)
 
+═══ 8. DISABILITY DOCUMENT / LETTER ═══
+Required checks:
+- This document does NOT need to follow Capaciti structure or wording
+- It may come from YES or any other legitimate organization
+- Candidate full name and surname visible
+- Gender visible where the document provides it
+- Signature present
+- Official stamp or police / certification stamp present
+- If a police station or certifying authority is visible, extract and report it
+- Do NOT fail the document only because the format, branding, or template differs from Capaciti
+
 ═══ OTHER DOCUMENTS ═══
 For any document that doesn't match the above types:
 - Check image clarity
+- Extract all readable information even if the document type is unfamiliar
+- Verify whether the candidate's full name and surname are present
+- Verify whether the candidate's ID number is present when the document contains one
 - Check for signatures where expected
 - Check for dates where expected
-- Check for stamps and certification marks
+- Check for stamps and certification marks only when relevant to that kind of document
 - If stamped: identify police station or commissioner
 - Extract any ID numbers present
+- If a stamp or certification would normally help but is not required for that document, raise it as a warning instead of a fail
+- Optional warning-only checks such as missing stamp or missing certification on non-required documents should be clearly labeled as optional in the check name
+- Do NOT fail a document only because it comes from a different organization or uses a different layout
 
 INFORMATION EXTRACTION RULES:
 - You MUST extract ALL readable information from the document into the extracted_info object
 - Extract names, ID numbers, dates, addresses, phone numbers, emails, reference numbers — everything visible
+- Check handwritten pen marks, ticks, crosses, and filled check boxes carefully because they carry important meaning
+- Read all pages of multi-page documents before deciding whether required information is missing
+- A stamp may overlap printed words or signatures; still identify the stamp details where visible instead of treating the overlap as an automatic failure
 - For ID documents: extract full name, ID number, date of birth, gender, nationality
+- For EEA1 / employment equity forms: extract the selected race and whether the person is marked as a foreign national
 - For contracts: extract employer name, job title, signature status, dates
 - For qualifications: extract institution name, qualification title, date of issue
 - For police clearance: extract SAPS reference number, station name, issue date
-- For proof of address: extract full address, account holder name, date
+- For proof of address: extract full address, account holder name, date, and accept non-Capaciti layouts from utilities, landlords, banks, or other organizations
+- For disability documents: extract the organization name, candidate full name, gender if shown, stamp details, and signature status
 - Leave fields empty string if not found — do not make up information
+
+PROOF OF ADDRESS RULES:
+- A proof of address document does NOT need to follow Capaciti structure or wording
+- Accept common proofs of address from different organizations as long as the address is readable
+- Prefer candidate name, account holder name, surname, issuer, reference number, and date when available
+- Do NOT fail a proof of address only because the template or layout differs from Capaciti
 
 STAMP DATE VALIDITY:
 - When a stamp date is found, calculate whether it is within ${stampValidityMonths} months from today (${today})
@@ -189,6 +260,7 @@ STAMP DATE VALIDITY:
 
 VALIDATION OUTPUT RULES:
 - For each check performed, include it in the "checks" array with name, status (pass/warning/fail), and detail
+- Prefix warning-only non-scoring checks with "Optional -", especially for missing stamp/certification findings on documents where those are not mandatory
 - Overall status: "fail" if ANY critical check fails, "warning" if non-critical issues exist, "pass" if all checks pass
 - Provide a plain-English explanation of findings
 - Be specific about what failed and why
@@ -230,6 +302,27 @@ function normalizeExtractedBirthDate(extractedInfo: Record<string, any> | null |
   };
 }
 
+function normalizeExtractedInfo(extractedInfo: Record<string, any> | null | undefined) {
+  if (!extractedInfo) return extractedInfo;
+
+  const normalized = normalizeExtractedBirthDate(extractedInfo) || extractedInfo;
+  const foreignNational = normalized.foreign_national;
+
+  if (typeof foreignNational === "string") {
+    const cleaned = foreignNational.trim().toLowerCase();
+
+    if (["yes", "y", "true", "foreigner", "foreign national"].includes(cleaned)) {
+      return { ...normalized, foreign_national: true };
+    }
+
+    if (["no", "n", "false", "south african", "sa citizen", "citizen"].includes(cleaned)) {
+      return { ...normalized, foreign_national: false };
+    }
+  }
+
+  return normalized;
+}
+
 async function fetchFileAsBase64(fileUrl: string): Promise<string> {
   const response = await fetch(fileUrl);
   if (!response.ok) throw new Error(`Failed to fetch file: ${response.status}`);
@@ -244,8 +337,11 @@ async function fetchFileAsBase64(fileUrl: string): Promise<string> {
   return btoa(binary);
 }
 
-async function buildUserContent(fileUrl: string, fileName: string): Promise<any[]> {
-  const textPrompt = `Analyze this document and validate it thoroughly. Filename: "${fileName}". Remember to extract stamp dates, police station names, and certification authority details. Respond using the extract_document_info function. Be thorough in your validation checks.`;
+async function buildUserContent(fileUrl: string, fileName: string, crossReferenceContext: CrossReferenceContext): Promise<any[]> {
+  const crossReferencePrompt = crossReferenceContext.available
+    ? `Cross-reference context is available. Candidate name: "${crossReferenceContext.candidateName || "Unknown"}". Candidate ID number from uploaded ID document: "${crossReferenceContext.idNumber || "Unknown"}". Use that uploaded ID information only for document types that require ID matching.`
+    : `Cross-reference context is not available. Do not perform candidate ID cross-reference checks, and do not raise a fail or warning just because no ID document was uploaded with this candidate's documents.`;
+  const textPrompt = `Analyze this document and validate it thoroughly. Filename: "${fileName}". ${crossReferencePrompt} Check all pages before deciding anything is missing. Do not stop at the first pages of a multi-page document. Read pen marks, ticks, handwritten selections, and check boxes carefully because they contain important answers. Remember to extract stamp dates, police station names, and certification authority details even when stamps overlap words. For employment equity forms, treat the nationality answer as Yes or No: No means South African, Yes means foreign national. If foreign national is marked yes, extract the acquired date of nationality, residence date, or permit-related date into extracted_info.foreign_national_support_date. For contracts, page 10 employee details is an information page and does not require employee or employer signatures. Some contracts require only the employee signature while others require both employee and employer signatures, so decide from the actual signature blocks and wording on the relevant signature page. For disability and proof-of-address documents, do not require Capaciti formatting if the core identifying information and stamps/signatures are present. For unfamiliar documents, still extract all readable information and verify candidate name, surname, and ID number where present. Mark non-required missing stamp or certification findings as warning checks prefixed with "Optional -". Respond using the extract_document_info function. Be thorough in your validation checks.`;
   
   try {
     const base64 = await fetchFileAsBase64(fileUrl);
@@ -279,8 +375,8 @@ async function buildUserContent(fileUrl: string, fileName: string): Promise<any[
   }
 }
 
-async function analyzeWithOpenRouter(apiKey: string, systemPrompt: string, fileUrl: string, fileName: string, asyncMode: boolean = false, documentId?: string) {
-  const userContent = await buildUserContent(fileUrl, fileName);
+async function analyzeWithOpenRouter(apiKey: string, systemPrompt: string, fileUrl: string, fileName: string, crossReferenceContext: CrossReferenceContext, asyncMode: boolean = false, documentId?: string) {
+  const userContent = await buildUserContent(fileUrl, fileName, crossReferenceContext);
 
   const body: Record<string, any> = {
     model: "google/gemini-2.5-flash",
@@ -315,13 +411,13 @@ async function analyzeWithOpenRouter(apiKey: string, systemPrompt: string, fileU
   return response;
 }
 
-async function analyzeWithOpenAI(apiKey: string, systemPrompt: string, fileUrl: string, fileName: string) {
+async function analyzeWithOpenAI(apiKey: string, systemPrompt: string, fileUrl: string, fileName: string, crossReferenceContext: CrossReferenceContext) {
   if (isPdfFile(fileName)) {
     console.log("Skipping OpenAI for PDF file - not supported by Vision API");
     return null;
   }
 
-  const userContent = await buildUserContent(fileUrl, fileName);
+  const userContent = await buildUserContent(fileUrl, fileName, crossReferenceContext);
 
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -342,8 +438,8 @@ async function analyzeWithOpenAI(apiKey: string, systemPrompt: string, fileUrl: 
   return response;
 }
 
-async function analyzeWithLovableAI(apiKey: string, systemPrompt: string, fileUrl: string, fileName: string) {
-  const userContent = await buildUserContent(fileUrl, fileName);
+async function analyzeWithLovableAI(apiKey: string, systemPrompt: string, fileUrl: string, fileName: string, crossReferenceContext: CrossReferenceContext) {
+  const userContent = await buildUserContent(fileUrl, fileName, crossReferenceContext);
 
   const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
@@ -389,7 +485,46 @@ serve(async (req) => {
     const stampValidityMonths = settings?.stamp_validity_months || 3;
     const strictMode = settings?.strict_mode || false;
 
-    const systemPrompt = buildSystemPrompt(confidenceThreshold, stampValidityMonths, strictMode);
+    const { data: currentDocument } = await supabase
+      .from("documents")
+      .select("id, candidate_id")
+      .eq("id", document_id)
+      .maybeSingle();
+
+    let crossReferenceContext: CrossReferenceContext = {
+      available: false,
+      candidateName: null,
+      idNumber: null,
+    };
+
+    if (currentDocument?.candidate_id) {
+      const { data: candidateDocuments } = await supabase
+        .from("documents")
+        .select("id, file_name, document_type, candidate_name_extracted, validation_details")
+        .eq("candidate_id", currentDocument.candidate_id);
+
+      const idDocument = candidateDocuments?.find((candidateDocument) => {
+        if (candidateDocument.id === document_id) return false;
+
+        const fileNameLower = candidateDocument.file_name.toLowerCase();
+        return candidateDocument.document_type === "ID Document"
+          || /\bid\b/.test(fileNameLower)
+          || fileNameLower.includes("identity");
+      });
+
+      const idDocumentDetails = idDocument?.validation_details as Record<string, any> | null | undefined;
+      const idNumber = idDocumentDetails?.extracted_id_number || idDocumentDetails?.extracted_info?.id_number || null;
+
+      if (idDocument && typeof idNumber === "string" && /^\d{13}$/.test(idNumber.replace(/\s/g, ""))) {
+        crossReferenceContext = {
+          available: true,
+          candidateName: idDocument.candidate_name_extracted || null,
+          idNumber: idNumber.replace(/\s/g, ""),
+        };
+      }
+    }
+
+    const systemPrompt = buildSystemPrompt(confidenceThreshold, stampValidityMonths, strictMode, crossReferenceContext);
 
     let aiResponse: Response;
     let aiProvider = "openrouter";
@@ -399,7 +534,7 @@ serve(async (req) => {
     if (OPENROUTER_API_KEY) {
       if (async_mode) {
         console.log("Using OpenRouter ASYNC mode with webhook callback for document:", document_id);
-        const asyncResult = await analyzeWithOpenRouter(OPENROUTER_API_KEY, systemPrompt, file_url, file_name, true, document_id);
+        const asyncResult = await analyzeWithOpenRouter(OPENROUTER_API_KEY, systemPrompt, file_url, file_name, crossReferenceContext, true, document_id);
         
         if (asyncResult.ok) {
           // Async request accepted - webhook will handle the result
@@ -419,39 +554,39 @@ serve(async (req) => {
 
       // Sync mode with OpenRouter
       console.log("Using OpenRouter (sync) for document analysis");
-      aiResponse = await analyzeWithOpenRouter(OPENROUTER_API_KEY, systemPrompt, file_url, file_name);
+      aiResponse = await analyzeWithOpenRouter(OPENROUTER_API_KEY, systemPrompt, file_url, file_name, crossReferenceContext);
       aiProvider = "openrouter";
 
       if (!aiResponse.ok) {
         console.log(`OpenRouter returned ${aiResponse.status}, falling back`);
         // Fall through to other providers
         if (OPENAI_API_KEY) {
-          const openaiResult = await analyzeWithOpenAI(OPENAI_API_KEY, systemPrompt, file_url, file_name);
+          const openaiResult = await analyzeWithOpenAI(OPENAI_API_KEY, systemPrompt, file_url, file_name, crossReferenceContext);
           if (openaiResult && openaiResult.ok) {
             aiResponse = openaiResult;
             aiProvider = "openai";
           } else if (LOVABLE_API_KEY) {
-            aiResponse = await analyzeWithLovableAI(LOVABLE_API_KEY, systemPrompt, file_url, file_name);
+            aiResponse = await analyzeWithLovableAI(LOVABLE_API_KEY, systemPrompt, file_url, file_name, crossReferenceContext);
             aiProvider = "lovable";
           }
         } else if (LOVABLE_API_KEY) {
-          aiResponse = await analyzeWithLovableAI(LOVABLE_API_KEY, systemPrompt, file_url, file_name);
+          aiResponse = await analyzeWithLovableAI(LOVABLE_API_KEY, systemPrompt, file_url, file_name, crossReferenceContext);
           aiProvider = "lovable";
         }
       }
     } else if (OPENAI_API_KEY) {
-      const openaiResult = await analyzeWithOpenAI(OPENAI_API_KEY, systemPrompt, file_url, file_name);
+      const openaiResult = await analyzeWithOpenAI(OPENAI_API_KEY, systemPrompt, file_url, file_name, crossReferenceContext);
       if (openaiResult && openaiResult.ok) {
         console.log("Using OpenAI GPT-4o Vision for document analysis");
         aiProvider = "openai";
         aiResponse = openaiResult;
       } else {
         aiProvider = "lovable";
-        aiResponse = await analyzeWithLovableAI(LOVABLE_API_KEY!, systemPrompt, file_url, file_name);
+        aiResponse = await analyzeWithLovableAI(LOVABLE_API_KEY!, systemPrompt, file_url, file_name, crossReferenceContext);
       }
     } else {
       console.log("Using Lovable AI for document analysis");
-      aiResponse = await analyzeWithLovableAI(LOVABLE_API_KEY!, systemPrompt, file_url, file_name);
+      aiResponse = await analyzeWithLovableAI(LOVABLE_API_KEY!, systemPrompt, file_url, file_name, crossReferenceContext);
     }
 
     if (!aiResponse.ok) {
@@ -499,7 +634,7 @@ serve(async (req) => {
     }
 
     // ── SA ID Structural Validation (Luhn checksum) ──
-    extracted.extracted_info = normalizeExtractedBirthDate(extracted.extracted_info);
+    extracted.extracted_info = normalizeExtractedInfo(extracted.extracted_info);
     const idToValidate = extracted.extracted_id_number || extracted.extracted_info?.id_number;
     let saIdValidation: Record<string, any> | null = null;
 
@@ -609,7 +744,7 @@ serve(async (req) => {
         stamp_date_valid: extracted.stamp_date_valid ?? null,
         police_station: extracted.police_station || null,
         certification_authority: extracted.certification_authority || null,
-        extracted_info: normalizeExtractedBirthDate(extracted.extracted_info) || null,
+        extracted_info: normalizeExtractedInfo(extracted.extracted_info) || null,
         ai_provider: aiProvider,
         sa_id_validation: saIdValidation,
       },

@@ -1,6 +1,213 @@
 import { supabase } from "@/integrations/supabase/client";
 import { calculateValidationScore } from "@/lib/validationScore";
 
+export interface UploadFileInstruction {
+  file: File;
+  targetCandidateId?: string;
+  replacementDocumentId?: string;
+  inferredDocumentType?: string;
+  matchedCandidateName?: string;
+}
+
+export interface UploadConflict {
+  fileName: string;
+  candidateId?: string;
+  candidateName?: string;
+  inferredDocumentType?: string;
+  existingDocumentId?: string;
+  existingFileName?: string;
+  existingUploadedAt?: string;
+}
+
+const DOCUMENT_TYPE_PATTERNS: { type: string; patterns: RegExp[] }[] = [
+  { type: "ID Document", patterns: [/\bid\b/i, /\bidentity\b/i] },
+  { type: "Signed Contract", patterns: [/\bcontract\b/i, /\bagreement\b/i] },
+  { type: "EEA1 Form", patterns: [/\beea1\b/i, /\bemployment[-_\s]?equity\b/i] },
+  { type: "Affidavit", patterns: [/\baffidavit\b/i] },
+  { type: "Attendance Register", patterns: [/\battendance\b/i, /\bregister\b/i, /\btraining[-_\s]?register\b/i] },
+  { type: "Qualification", patterns: [/\bqualification\b/i, /\bcertificate\b/i, /\bdiploma\b/i] },
+  { type: "Proof of Address", patterns: [/\bproof[-_\s]?of[-_\s]?address\b/i, /\baddress\b/i] },
+  { type: "Tax Certificate", patterns: [/\btax\b/i] },
+  { type: "Police Clearance", patterns: [/\bpolice\b/i, /\bclearance\b/i] },
+  { type: "CV/Resume", patterns: [/\bcv\b/i, /\bresume\b/i] },
+  { type: "Reference Letter", patterns: [/\breference\b/i, /\bletter\b/i] },
+  { type: "Medical Certificate", patterns: [/\bmedical\b/i] },
+  { type: "Disability Document", patterns: [/\bdisability\b/i] },
+  { type: "Bank Statement", patterns: [/\bbank\b/i, /\bstatement\b/i] },
+  { type: "Employment Contract", patterns: [/\bemployment[-_\s]?contract\b/i] },
+];
+
+function normalizeName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z\s]/g, "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .sort()
+    .join(" ");
+}
+
+function toDisplayName(rawName: string): string {
+  return rawName.replace(/\b\w/g, (c) => c.toUpperCase()).replace(/\s+/g, " ").trim();
+}
+
+function inferDocumentTypeFromFileName(fileName: string): string | undefined {
+  const withoutExt = fileName.replace(/\.[^.]+$/, "");
+  for (const documentType of DOCUMENT_TYPE_PATTERNS) {
+    if (documentType.patterns.some((pattern) => pattern.test(withoutExt))) {
+      return documentType.type;
+    }
+  }
+
+  return undefined;
+}
+
+function matchCandidateFromFileName(
+  fileName: string,
+  candidates: { id: string; name: string }[],
+): { id: string; name: string } | undefined {
+  const withoutExt = fileName.replace(/\.[^.]+$/, "").toLowerCase();
+  const sanitized = withoutExt.replace(/[^a-z\s]/g, " ");
+  const fileParts = sanitized.split(/\s+/).filter(Boolean);
+
+  let bestMatch: { id: string; name: string; score: number } | undefined;
+
+  for (const candidate of candidates) {
+    const candidateParts = candidate.name.toLowerCase().replace(/[^a-z\s]/g, "").split(/\s+/).filter(Boolean);
+    if (candidateParts.length === 0) continue;
+
+    const matchingParts = candidateParts.filter((part) => fileParts.includes(part));
+    const score = matchingParts.length;
+
+    if (score >= Math.min(2, candidateParts.length)) {
+      if (!bestMatch || score > bestMatch.score) {
+        bestMatch = { ...candidate, score };
+      }
+    }
+  }
+
+  return bestMatch ? { id: bestMatch.id, name: bestMatch.name } : undefined;
+}
+
+function getChecksForDocument(document: any) {
+  const details = document.validation_details as any;
+  return details?.checks || [];
+}
+
+function getExtractedIdNumber(document: any): string | null {
+  const details = document.validation_details as any;
+  return details?.extracted_id_number || details?.extracted_info?.id_number || null;
+}
+
+async function syncSessionCandidates(sessionId: string) {
+  const { data: docs, error: docsError } = await supabase
+    .from("documents")
+    .select("*")
+    .eq("session_id", sessionId)
+    .order("created_at", { ascending: true });
+
+  if (docsError) throw docsError;
+  if (!docs) return;
+
+  const { data: existingCandidates, error: candidatesError } = await supabase
+    .from("candidates")
+    .select("id, name")
+    .eq("session_id", sessionId);
+
+  if (candidatesError) throw candidatesError;
+
+  const candidateMap = new Map<string, typeof docs>();
+  const normalizedToOriginal = new Map<string, string>();
+
+  for (const doc of docs) {
+    const rawName = doc.candidate_name_extracted || "Unknown";
+    const normalized = normalizeName(rawName);
+
+    if (!normalizedToOriginal.has(normalized)) {
+      normalizedToOriginal.set(normalized, toDisplayName(rawName));
+    }
+
+    const displayName = normalizedToOriginal.get(normalized)!;
+    if (!candidateMap.has(displayName)) candidateMap.set(displayName, []);
+    candidateMap.get(displayName)!.push(doc);
+  }
+
+  const existingCandidateMap = new Map(
+    (existingCandidates || []).map((candidate) => [normalizeName(candidate.name), candidate]),
+  );
+  const syncedCandidateIds = new Set<string>();
+
+  for (const [name, candidateDocs] of candidateMap) {
+    const allChecks = candidateDocs.flatMap((document) => getChecksForDocument(document));
+    const score = allChecks.length > 0 ? calculateValidationScore(allChecks) : 0;
+    const hasFailure = candidateDocs.some((document) => document.validation_status === "fail");
+    const hasWarning = candidateDocs.some((document) => document.validation_status === "warning");
+    const status = hasFailure ? "fail" : hasWarning ? "warning" : "pass";
+    const allIssues = candidateDocs.flatMap((document) => document.issues || []);
+    const extractedIdNumber = candidateDocs.map((document) => getExtractedIdNumber(document)).find(Boolean) || null;
+    const summary = `${candidateDocs.length} document(s) processed. ${hasFailure ? "Some documents failed validation." : hasWarning ? "Some documents have warnings." : "All documents passed."}${allIssues.length > 0 ? " Issues: " + allIssues.join("; ") : ""}`;
+
+    const normalized = normalizeName(name);
+    const existingCandidate = existingCandidateMap.get(normalized);
+
+    let candidateId = existingCandidate?.id;
+
+    if (existingCandidate) {
+      const { error } = await supabase
+        .from("candidates")
+        .update({
+          name,
+          id_number: extractedIdNumber,
+          score,
+          status,
+          summary,
+        })
+        .eq("id", existingCandidate.id);
+
+      if (error) throw error;
+    } else {
+      const { data: insertedCandidate, error } = await supabase
+        .from("candidates")
+        .insert({
+          session_id: sessionId,
+          name,
+          id_number: extractedIdNumber,
+          score,
+          status,
+          summary,
+        })
+        .select("id")
+        .single();
+
+      if (error) throw error;
+      candidateId = insertedCandidate.id;
+    }
+
+    if (!candidateId) continue;
+    syncedCandidateIds.add(candidateId);
+
+    for (const document of candidateDocs) {
+      if (document.candidate_id !== candidateId) {
+        const { error } = await supabase
+          .from("documents")
+          .update({ candidate_id: candidateId })
+          .eq("id", document.id);
+
+        if (error) throw error;
+      }
+    }
+  }
+
+  const staleCandidateIds = (existingCandidates || [])
+    .map((candidate) => candidate.id)
+    .filter((candidateId) => !syncedCandidateIds.has(candidateId));
+
+  if (staleCandidateIds.length > 0) {
+    const { error } = await supabase.from("candidates").delete().in("id", staleCandidateIds);
+    if (error) throw error;
+  }
+}
+
 export async function createSession(name: string): Promise<string> {
   const { data, error } = await supabase
     .from("sessions")
@@ -94,18 +301,69 @@ export async function checkDuplicateFiles(sessionId: string, fileNames: string[]
   return duplicates;
 }
 
-export async function uploadAndProcessFiles(
+export async function checkSessionUploadConflicts(
   sessionId: string,
   files: File[],
+): Promise<UploadConflict[]> {
+  const [{ data: candidates }, { data: documents }] = await Promise.all([
+    supabase.from("candidates").select("id, name").eq("session_id", sessionId),
+    supabase.from("documents").select("id, candidate_id, file_name, created_at, document_type").eq("session_id", sessionId),
+  ]);
+
+  const sessionCandidates = candidates || [];
+  const sessionDocuments = documents || [];
+
+  return files.map((file) => {
+    const matchedCandidate = matchCandidateFromFileName(file.name, sessionCandidates);
+    const inferredDocumentType = inferDocumentTypeFromFileName(file.name);
+
+    let existingDocument:
+      | { id: string; file_name: string; created_at: string; document_type: string | null }
+      | undefined;
+
+    if (matchedCandidate && inferredDocumentType) {
+      existingDocument = sessionDocuments.find((document) =>
+        document.candidate_id === matchedCandidate.id && document.document_type === inferredDocumentType,
+      );
+    }
+
+    return {
+      fileName: file.name,
+      candidateId: matchedCandidate?.id,
+      candidateName: matchedCandidate?.name,
+      inferredDocumentType,
+      existingDocumentId: existingDocument?.id,
+      existingFileName: existingDocument?.file_name,
+      existingUploadedAt: existingDocument?.created_at,
+    };
+  });
+}
+
+export async function uploadAndProcessFiles(
+  sessionId: string,
+  fileInstructions: UploadFileInstruction[],
   onProgress: (processed: number, total: number) => void,
   replaceExisting: boolean = false
 ) {
-  const total = files.length;
-  await supabase.from("sessions").update({ total_documents: total, status: "processing" }).eq("id", sessionId);
+  const total = fileInstructions.length;
+  await supabase.from("sessions").update({ status: "processing" }).eq("id", sessionId);
 
-  // If replacing, delete existing documents with same names
-  if (replaceExisting) {
-    const fileNames = files.map(f => f.name);
+  const replacementDocumentIds = fileInstructions
+    .map((instruction) => instruction.replacementDocumentId)
+    .filter((value): value is string => Boolean(value));
+
+  if (replacementDocumentIds.length > 0) {
+    const { data: existingDocs } = await supabase
+      .from("documents")
+      .select("id, file_path")
+      .in("id", replacementDocumentIds);
+
+    if (existingDocs && existingDocs.length > 0) {
+      await supabase.storage.from("documents").remove(existingDocs.map((document) => document.file_path));
+      await supabase.from("documents").delete().in("id", existingDocs.map((document) => document.id));
+    }
+  } else if (replaceExisting) {
+    const fileNames = fileInstructions.map((instruction) => instruction.file.name);
     const { data: existingDocs } = await supabase
       .from("documents")
       .select("id, file_path, file_name")
@@ -113,21 +371,18 @@ export async function uploadAndProcessFiles(
       .in("file_name", fileNames);
 
     if (existingDocs && existingDocs.length > 0) {
-      // Delete storage files
-      await supabase.storage.from("documents").remove(existingDocs.map(d => d.file_path));
-      // Delete document records
-      for (const doc of existingDocs) {
-        await supabase.from("documents").delete().eq("id", doc.id);
-      }
+      await supabase.storage.from("documents").remove(existingDocs.map((document) => document.file_path));
+      await supabase.from("documents").delete().in("id", existingDocs.map((document) => document.id));
     }
   }
 
   const BATCH_SIZE = 5;
   const documentRecords: { id: string; fileName: string; filePath: string; fileSize: number }[] = [];
 
-  for (let i = 0; i < files.length; i += BATCH_SIZE) {
-    const batch = files.slice(i, i + BATCH_SIZE);
-    const uploads = batch.map(async (file) => {
+  for (let i = 0; i < fileInstructions.length; i += BATCH_SIZE) {
+    const batch = fileInstructions.slice(i, i + BATCH_SIZE);
+    const uploads = batch.map(async (instruction) => {
+      const file = instruction.file;
       const filePath = `${sessionId}/${Date.now()}-${file.name}`;
       const { error: uploadError } = await supabase.storage.from("documents").upload(filePath, file);
       if (uploadError) throw uploadError;
@@ -136,6 +391,7 @@ export async function uploadAndProcessFiles(
         .from("documents")
         .insert({
           session_id: sessionId,
+          candidate_id: instruction.targetCandidateId || null,
           file_name: file.name,
           file_path: filePath,
           file_size: file.size,
@@ -184,100 +440,7 @@ export async function uploadAndProcessFiles(
     onProgress(processed, total);
     await supabase.from("sessions").update({ processed_documents: processed }).eq("id", sessionId);
   }
-
-  const { data: docs } = await supabase
-    .from("documents")
-    .select("*")
-    .eq("session_id", sessionId);
-
-  if (docs) {
-    // Delete existing candidates for this session if replacing
-    if (replaceExisting) {
-      await supabase.from("candidates").delete().eq("session_id", sessionId);
-    }
-
-    // Normalize candidate names for grouping: case-insensitive, order-insensitive, handle middle names
-    function normalizeName(name: string): string {
-      return name
-        .toLowerCase()
-        .replace(/[^a-z\s]/g, '') // remove non-alpha except spaces
-        .split(/\s+/)
-        .filter(Boolean)
-        .sort()
-        .join(' ');
-    }
-
-    const candidateMap = new Map<string, typeof docs>();
-    const normalizedToOriginal = new Map<string, string>();
-    
-    for (const doc of docs) {
-      const rawName = doc.candidate_name_extracted || "Unknown";
-      const normalized = normalizeName(rawName);
-      
-      // Use the first encountered original name as the display name
-      if (!normalizedToOriginal.has(normalized)) {
-        // Use the version with proper casing (title case the raw name)
-        normalizedToOriginal.set(normalized, rawName.replace(/\b\w/g, c => c.toUpperCase()).replace(/\s+/g, ' ').trim());
-      }
-      
-      const displayName = normalizedToOriginal.get(normalized)!;
-      if (!candidateMap.has(displayName)) candidateMap.set(displayName, []);
-      candidateMap.get(displayName)!.push(doc);
-    }
-
-    for (const [name, candidateDocs] of candidateMap) {
-      // Calculate score from checks: passed checks / total checks * 100
-      const allChecks = candidateDocs.flatMap((d) => {
-        const details = d.validation_details as any;
-        return details?.checks || [];
-      });
-      const avgScore = calculateValidationScore(allChecks);
-      const hasFailure = candidateDocs.some((d) => d.validation_status === "fail");
-      const hasWarning = candidateDocs.some((d) => d.validation_status === "warning");
-      const status = hasFailure ? "fail" : hasWarning ? "warning" : "pass";
-
-      const allIssues = candidateDocs.flatMap((d) => d.issues || []);
-
-      // Check if candidate already exists (for keep-both scenario)
-      const { data: existingCandidate } = await supabase
-        .from("candidates")
-        .select("id")
-        .eq("session_id", sessionId)
-        .eq("name", name)
-        .maybeSingle();
-
-      if (existingCandidate) {
-        // Update existing candidate
-        await supabase.from("candidates").update({
-          score: avgScore,
-          status,
-          summary: `${candidateDocs.length} document(s) processed. ${hasFailure ? "Some documents failed validation." : hasWarning ? "Some documents have warnings." : "All documents passed."}${allIssues.length > 0 ? " Issues: " + allIssues.join("; ") : ""}`,
-        }).eq("id", existingCandidate.id);
-
-        for (const doc of candidateDocs) {
-          await supabase.from("documents").update({ candidate_id: existingCandidate.id }).eq("id", doc.id);
-        }
-      } else {
-        const { data: candidate } = await supabase
-          .from("candidates")
-          .insert({
-            session_id: sessionId,
-            name,
-            score: avgScore,
-            status,
-            summary: `${candidateDocs.length} document(s) processed. ${hasFailure ? "Some documents failed validation." : hasWarning ? "Some documents have warnings." : "All documents passed."}${allIssues.length > 0 ? " Issues: " + allIssues.join("; ") : ""}`,
-          })
-          .select("id")
-          .single();
-
-        if (candidate) {
-          for (const doc of candidateDocs) {
-            await supabase.from("documents").update({ candidate_id: candidate.id }).eq("id", doc.id);
-          }
-        }
-      }
-    }
-  }
+  await syncSessionCandidates(sessionId);
 
   const { data: finalDocs } = await supabase
     .from("documents")

@@ -22,6 +22,13 @@ const SessionDetail = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [filter, setFilter] = useState<FilterType>("all");
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [replacementTarget, setReplacementTarget] = useState<{
+    candidateId: string;
+    candidateName: string;
+    documentId: string;
+    documentType: string;
+    fileName: string;
+  } | null>(null);
   const [selectedCandidate, setSelectedCandidate] = useState<CandidateData | null>(null);
   const queryClient = useQueryClient();
 
@@ -46,6 +53,8 @@ const SessionDetail = () => {
   const candidatesWithDocs = useMemo(() => candidates.map((c) => {
     const candidateDocs = documents.filter((d) => d.candidate_id === c.id);
     const docData: DocumentData[] = candidateDocs.map((d) => ({
+      id: d.id,
+      candidateId: d.candidate_id || undefined,
       type: d.document_type || "Unknown",
       status: (d.validation_status as "pass" | "warning" | "fail") || "pass",
       fileName: d.file_name,
@@ -66,13 +75,22 @@ const SessionDetail = () => {
     // Calculate score dynamically from checks: passed / total * 100
     const allChecks = docData.flatMap((d) => d.checks || []);
     const dynamicScore = allChecks.length > 0 ? calculateValidationScore(allChecks) : (c.score || 0);
-    const primaryDocumentType = docData[0]?.type;
+    const uniqueDocumentTypes = Array.from(
+      new Set(
+        docData
+          .map((doc) => doc.type?.trim())
+          .filter((type): type is string => Boolean(type && type.length > 0 && type !== "Unknown"))
+      )
+    );
+    const documentTypeLabel = uniqueDocumentTypes.length > 0
+      ? `Document Types: ${uniqueDocumentTypes.join(", ")}`
+      : "Document Type: Unknown";
 
     return {
       id: c.id,
       name: c.name,
       idNumber: c.id_number || "N/A",
-      primaryDocumentLabel: primaryDocumentType ? `Document Type: ${primaryDocumentType}` : "Document Type: Unknown",
+      primaryDocumentLabel: documentTypeLabel,
       score: dynamicScore,
       status: (c.status as "pass" | "warning" | "fail") || "pass",
       documents: docData,
@@ -123,9 +141,27 @@ const SessionDetail = () => {
 
   const handleUploadComplete = (sessionId: string) => {
     setUploadOpen(false);
+    setReplacementTarget(null);
     queryClient.invalidateQueries({ queryKey: ["session", id] });
     queryClient.invalidateQueries({ queryKey: ["candidates", id] });
     queryClient.invalidateQueries({ queryKey: ["documents", id] });
+  };
+
+  const handleReplaceDocument = (candidate: CandidateData, doc: DocumentData) => {
+    if (!doc.id || !candidate.id) {
+      toast.error("This document cannot be replaced yet.");
+      return;
+    }
+
+    setSelectedCandidate(null);
+    setReplacementTarget({
+      candidateId: candidate.id,
+      candidateName: candidate.name,
+      documentId: doc.id,
+      documentType: doc.type,
+      fileName: doc.fileName,
+    });
+    setUploadOpen(true);
   };
 
   return (
@@ -231,8 +267,19 @@ const SessionDetail = () => {
         )}
       </div>
 
-      <UploadModal open={uploadOpen} onClose={() => setUploadOpen(false)} onComplete={handleUploadComplete} existingSessionId={id} />
-      <CandidateModal candidate={selectedCandidate} open={!!selectedCandidate} onClose={() => setSelectedCandidate(null)} />
+      <UploadModal
+        open={uploadOpen}
+        onClose={() => { setUploadOpen(false); setReplacementTarget(null); }}
+        onComplete={handleUploadComplete}
+        existingSessionId={id}
+        replacementTarget={replacementTarget}
+      />
+      <CandidateModal
+        candidate={selectedCandidate}
+        open={!!selectedCandidate}
+        onClose={() => setSelectedCandidate(null)}
+        onReplaceDocument={handleReplaceDocument}
+      />
     </div>
   );
 };

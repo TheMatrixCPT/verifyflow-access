@@ -6,11 +6,45 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-function calculateValidationScore(checks: { status: string }[] = []): number {
-  if (checks.length === 0) return 0;
+function isNonScoringOptionalWarning(check: { name?: string; detail?: string; status: string }): boolean {
+  if (check.status !== "warning") return false;
 
-  const passedChecks = checks.filter((check) => check.status === "pass").length;
-  return Math.round((passedChecks / checks.length) * 100);
+  const combinedText = `${check.name || ""} ${check.detail || ""}`.toLowerCase();
+  const isOptional = combinedText.includes("optional");
+  const isStampOrCertificationWarning =
+    combinedText.includes("stamp")
+    || combinedText.includes("certif")
+    || combinedText.includes("commissioner")
+    || combinedText.includes("police station");
+
+  return isOptional || isStampOrCertificationWarning;
+}
+
+function calculateValidationScore(checks: { name?: string; detail?: string; status: string }[] = []): number {
+  const scoringChecks = checks.filter((check) => !isNonScoringOptionalWarning(check));
+  if (scoringChecks.length === 0) return 0;
+
+  const passedChecks = scoringChecks.filter((check) => check.status === "pass").length;
+  return Math.round((passedChecks / scoringChecks.length) * 100);
+}
+
+function normalizeExtractedInfo(extractedInfo: Record<string, any> | null | undefined) {
+  if (!extractedInfo) return extractedInfo;
+
+  const normalized = { ...extractedInfo };
+  const foreignNational = normalized.foreign_national;
+
+  if (typeof foreignNational === "string") {
+    const cleaned = foreignNational.trim().toLowerCase();
+
+    if (["yes", "y", "true", "foreigner", "foreign national"].includes(cleaned)) {
+      normalized.foreign_national = true;
+    } else if (["no", "n", "false", "south african", "sa citizen", "citizen"].includes(cleaned)) {
+      normalized.foreign_national = false;
+    }
+  }
+
+  return normalized;
 }
 
 serve(async (req) => {
@@ -96,7 +130,7 @@ serve(async (req) => {
         stamp_date_valid: extracted.stamp_date_valid ?? null,
         police_station: extracted.police_station || null,
         certification_authority: extracted.certification_authority || null,
-        extracted_info: extracted.extracted_info || null,
+        extracted_info: normalizeExtractedInfo(extracted.extracted_info) || null,
         ai_provider: "openrouter-async",
       },
       processed_at: new Date().toISOString(),
