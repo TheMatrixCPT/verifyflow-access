@@ -375,10 +375,33 @@ async function buildUserContent(fileUrl: string, fileName: string, crossReferenc
   }
 }
 
-function buildOpenAIResponsesInput(systemPrompt: string, userContent: any[]) {
+function buildOpenAIResponsesInput(systemPrompt: string, userContent: any[], fileUrl: string, fileName: string) {
   const developerContent = [
     { type: "input_text", text: systemPrompt },
   ];
+
+  if (isPdfFile(fileName)) {
+    return [
+      {
+        role: "developer",
+        content: developerContent,
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_file",
+            file_url: fileUrl,
+            filename: fileName,
+          },
+          {
+            type: "input_text",
+            text: userContent.find((item) => item.type === "text")?.text || `Analyze this PDF document: ${fileName}`,
+          },
+        ],
+      },
+    ];
+  }
 
   const mappedUserContent = userContent.map((item) => {
     if (item.type === "text") {
@@ -464,13 +487,8 @@ async function analyzeWithOpenRouter(apiKey: string, systemPrompt: string, fileU
 }
 
 async function analyzeWithOpenAI(apiKey: string, systemPrompt: string, fileUrl: string, fileName: string, crossReferenceContext: CrossReferenceContext) {
-  if (isPdfFile(fileName)) {
-    console.log("Skipping OpenAI for PDF file - not supported by Vision API");
-    return null;
-  }
-
   const userContent = await buildUserContent(fileUrl, fileName, crossReferenceContext);
-  const input = buildOpenAIResponsesInput(systemPrompt, userContent);
+  const input = buildOpenAIResponsesInput(systemPrompt, userContent, fileUrl, fileName);
 
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
@@ -630,7 +648,7 @@ serve(async (req) => {
     } else if (OPENAI_API_KEY) {
       const openaiResult = await analyzeWithOpenAI(OPENAI_API_KEY, systemPrompt, file_url, file_name, crossReferenceContext);
       if (openaiResult && openaiResult.ok) {
-        console.log("Using OpenAI GPT-4o Vision for document analysis");
+        console.log("Using OpenAI Responses API with gpt-5.4 for document analysis");
         aiProvider = "openai";
         aiResponse = openaiResult;
       } else {
