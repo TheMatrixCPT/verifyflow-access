@@ -375,6 +375,58 @@ async function buildUserContent(fileUrl: string, fileName: string, crossReferenc
   }
 }
 
+function buildOpenAIResponsesInput(systemPrompt: string, userContent: any[]) {
+  const developerContent = [
+    { type: "input_text", text: systemPrompt },
+  ];
+
+  const mappedUserContent = userContent.map((item) => {
+    if (item.type === "text") {
+      return { type: "input_text", text: item.text };
+    }
+
+    if (item.type === "image_url") {
+      return {
+        type: "input_image",
+        image_url: item.image_url?.url || "",
+        detail: item.image_url?.detail,
+      };
+    }
+
+    return { type: "input_text", text: JSON.stringify(item) };
+  });
+
+  return [
+    {
+      role: "developer",
+      content: developerContent,
+    },
+    {
+      role: "user",
+      content: mappedUserContent,
+    },
+  ];
+}
+
+function extractToolCall(aiData: Record<string, any>) {
+  const chatCompletionsToolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
+  if (chatCompletionsToolCall) return chatCompletionsToolCall;
+
+  const responseOutput = Array.isArray(aiData.output) ? aiData.output : [];
+  const directFunctionCall = responseOutput.find((item) => item?.type === "function_call" && item?.name === "extract_document_info");
+  if (directFunctionCall) return directFunctionCall;
+
+  for (const item of responseOutput) {
+    const nestedFunctionCall = Array.isArray(item?.content)
+      ? item.content.find((contentItem: any) => contentItem?.type === "function_call" && contentItem?.name === "extract_document_info")
+      : null;
+
+    if (nestedFunctionCall) return nestedFunctionCall;
+  }
+
+  return null;
+}
+
 async function analyzeWithOpenRouter(apiKey: string, systemPrompt: string, fileUrl: string, fileName: string, crossReferenceContext: CrossReferenceContext, asyncMode: boolean = false, documentId?: string) {
   const userContent = await buildUserContent(fileUrl, fileName, crossReferenceContext);
 
@@ -418,21 +470,22 @@ async function analyzeWithOpenAI(apiKey: string, systemPrompt: string, fileUrl: 
   }
 
   const userContent = await buildUserContent(fileUrl, fileName, crossReferenceContext);
+  const input = buildOpenAIResponsesInput(systemPrompt, userContent);
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "gpt-4o",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userContent }
-      ],
+      model: "gpt-5.4",
+      input,
       tools: [toolSchema],
-      tool_choice: { type: "function", function: { name: "extract_document_info" } }
+      tool_choice: {
+        type: "function",
+        name: "extract_document_info",
+      },
     }),
   });
   return response;
@@ -607,7 +660,7 @@ serve(async (req) => {
     }
 
     const aiData = await aiResponse.json();
-    const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
+    const toolCall = extractToolCall(aiData);
 
     let extracted = {
       document_type: "Other",
@@ -625,9 +678,10 @@ serve(async (req) => {
       extracted_info: null as Record<string, any> | null,
     };
 
-    if (toolCall?.function?.arguments) {
+    const toolArguments = toolCall?.function?.arguments || toolCall?.arguments;
+    if (toolArguments) {
       try {
-        extracted = JSON.parse(toolCall.function.arguments);
+        extracted = JSON.parse(toolArguments);
       } catch (e) {
         console.error("Failed to parse AI response:", e);
       }
