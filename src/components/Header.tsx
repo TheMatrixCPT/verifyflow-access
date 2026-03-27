@@ -31,6 +31,8 @@ const Header = React.forwardRef<HTMLElement>((_, ref) => {
       </Link>
     </header>
   );
-};
+});
+
+Header.displayName = "Header";
 
 export default Header;
