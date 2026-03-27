@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { CheckCircle, AlertTriangle, XCircle, FileText, Eye, ExternalLink, Clock, Loader2, ChevronDown, User, Hash, Calendar, MapPin, Phone, Mail, Briefcase, GraduationCap, Building, ShieldCheck, Upload } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
 import { toast } from "sonner";
@@ -246,6 +246,7 @@ const CandidateModal = ({ candidate, open, onClose, onReplaceDocument }: Candida
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
+          <DialogDescription className="sr-only">Candidate validation details and document review</DialogDescription>
           <div className="flex items-center justify-between pr-6">
             <div>
               <DialogTitle className="text-xl font-bold text-foreground">{candidate.name}</DialogTitle>

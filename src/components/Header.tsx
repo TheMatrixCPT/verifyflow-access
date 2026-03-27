@@ -1,8 +1,9 @@
+import React from "react";
 import { Settings, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 
-const Header = () => {
+const Header = React.forwardRef<HTMLElement>((_, ref) => {
   return (
     <header className="bg-card h-[64px] px-6 flex items-center justify-between border-b border-border">
       <Link to="/" className="flex items-center gap-2.5">
@@ -30,6 +31,8 @@ const Header = () => {
       </Link>
     </header>
   );
-};
+});
+
+Header.displayName = "Header";
 
 export default Header;
