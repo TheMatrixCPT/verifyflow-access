@@ -375,86 +375,11 @@ async function buildUserContent(fileUrl: string, fileName: string, crossReferenc
   }
 }
 
-function buildOpenAIResponsesInput(systemPrompt: string, userContent: any[], fileUrl: string, fileName: string) {
-  const developerContent = [
-    { type: "input_text", text: systemPrompt },
-  ];
-
-  if (isPdfFile(fileName)) {
-    return [
-      {
-        role: "developer",
-        content: developerContent,
-      },
-      {
-        role: "user",
-        content: [
-          {
-            type: "input_file",
-            file_url: fileUrl,
-            filename: fileName,
-          },
-          {
-            type: "input_text",
-            text: userContent.find((item) => item.type === "text")?.text || `Analyze this PDF document: ${fileName}`,
-          },
-        ],
-      },
-    ];
-  }
-
-  const mappedUserContent = userContent.map((item) => {
-    if (item.type === "text") {
-      return { type: "input_text", text: item.text };
-    }
-
-    if (item.type === "image_url") {
-      return {
-        type: "input_image",
-        image_url: item.image_url?.url || "",
-        detail: item.image_url?.detail,
-      };
-    }
-
-    return { type: "input_text", text: JSON.stringify(item) };
-  });
-
-  return [
-    {
-      role: "developer",
-      content: developerContent,
-    },
-    {
-      role: "user",
-      content: mappedUserContent,
-    },
-  ];
-}
-
-function extractToolCall(aiData: Record<string, any>) {
-  const chatCompletionsToolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
-  if (chatCompletionsToolCall) return chatCompletionsToolCall;
-
-  const responseOutput = Array.isArray(aiData.output) ? aiData.output : [];
-  const directFunctionCall = responseOutput.find((item) => item?.type === "function_call" && item?.name === "extract_document_info");
-  if (directFunctionCall) return directFunctionCall;
-
-  for (const item of responseOutput) {
-    const nestedFunctionCall = Array.isArray(item?.content)
-      ? item.content.find((contentItem: any) => contentItem?.type === "function_call" && contentItem?.name === "extract_document_info")
-      : null;
-
-    if (nestedFunctionCall) return nestedFunctionCall;
-  }
-
-  return null;
-}
-
-async function analyzeWithOpenRouter(apiKey: string, systemPrompt: string, fileUrl: string, fileName: string, crossReferenceContext: CrossReferenceContext, asyncMode: boolean = false, documentId?: string) {
+async function analyzeWithOpenRouter(apiKey: string, model: string, systemPrompt: string, fileUrl: string, fileName: string, crossReferenceContext: CrossReferenceContext, asyncMode: boolean = false, documentId?: string) {
   const userContent = await buildUserContent(fileUrl, fileName, crossReferenceContext);
 
   const body: Record<string, any> = {
-    model: "google/gemini-2.5-flash",
+    model,
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userContent }
@@ -482,51 +407,6 @@ async function analyzeWithOpenRouter(apiKey: string, systemPrompt: string, fileU
       "X-Title": "CapaCiTi Document Validator",
     },
     body: JSON.stringify(body),
-  });
-  return response;
-}
-
-async function analyzeWithOpenAI(apiKey: string, systemPrompt: string, fileUrl: string, fileName: string, crossReferenceContext: CrossReferenceContext) {
-  const userContent = await buildUserContent(fileUrl, fileName, crossReferenceContext);
-  const input = buildOpenAIResponsesInput(systemPrompt, userContent, fileUrl, fileName);
-
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "gpt-5.4",
-      input,
-      tools: [toolSchema],
-      tool_choice: {
-        type: "function",
-        name: "extract_document_info",
-      },
-    }),
-  });
-  return response;
-}
-
-async function analyzeWithLovableAI(apiKey: string, systemPrompt: string, fileUrl: string, fileName: string, crossReferenceContext: CrossReferenceContext) {
-  const userContent = await buildUserContent(fileUrl, fileName, crossReferenceContext);
-
-  const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "google/gemini-2.5-flash",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userContent }
-      ],
-      tools: [toolSchema],
-      tool_choice: { type: "function", function: { name: "extract_document_info" } }
-    }),
   });
   return response;
 }
