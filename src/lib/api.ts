@@ -427,7 +427,29 @@ export async function uploadAndProcessFiles(
             file_name: doc.fileName,
           },
         });
-        if (error) console.error("Processing error for", doc.fileName, error);
+
+        if (error) {
+          // Check for credit/rate limit errors from the edge function
+          const errorBody = typeof error === 'object' && error !== null ? (error as any) : {};
+          const errorMessage = errorBody?.message || '';
+          const context = (error as any)?.context;
+          
+          // supabase.functions.invoke wraps non-2xx responses - check context for status
+          if (context?.status === 402 || errorMessage.includes('credits_exhausted')) {
+            const { toast } = await import('sonner');
+            toast.error("Credits Exhausted", {
+              description: "Your OpenRouter credits have been exhausted. Please top up at openrouter.ai to continue processing documents.",
+              duration: 10000,
+            });
+          } else if (context?.status === 429 || errorMessage.includes('rate_limited')) {
+            const { toast } = await import('sonner');
+            toast.error("Rate Limited", {
+              description: "Rate limit reached. Please wait a moment and try again.",
+              duration: 5000,
+            });
+          }
+          console.error("Processing error for", doc.fileName, error);
+        }
         return data;
       } catch (e) {
         console.error("Failed to process", doc.fileName, e);
