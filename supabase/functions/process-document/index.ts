@@ -411,19 +411,32 @@ async function analyzeWithOpenRouter(apiKey: string, model: string, systemPrompt
   return response;
 }
 
+function extractToolCall(aiData: Record<string, any>) {
+  const chatCompletionsToolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
+  if (chatCompletionsToolCall) return chatCompletionsToolCall;
+  return null;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { document_id, file_url, file_name, async_mode } = await req.json();
+    const { document_id, file_url, file_name, async_mode, model } = await req.json();
 
     const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
 
-    if (!OPENROUTER_API_KEY && !LOVABLE_API_KEY && !OPENAI_API_KEY) {
-      throw new Error("No AI API key configured. Need OPENROUTER_API_KEY, LOVABLE_API_KEY, or OPENAI_API_KEY.");
+    if (!OPENROUTER_API_KEY) {
+      return new Response(JSON.stringify({
+        error: "api_key_missing",
+        message: "OpenRouter API key is not configured. Please add your OPENROUTER_API_KEY to continue processing documents.",
+      }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
+
+    // Default model is Gemini 2.5 Flash, can be overridden to e.g. "openai/gpt-5.4"
+    const aiModel = model || "google/gemini-2.5-flash";
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -480,65 +493,30 @@ serve(async (req) => {
     let aiResponse: Response;
     let aiProvider = "openrouter";
 
-    // Priority: OpenRouter > OpenAI > Lovable AI
-    // For async_mode (batch processing), use OpenRouter webhooks
-    if (OPENROUTER_API_KEY) {
-      if (async_mode) {
-        console.log("Using OpenRouter ASYNC mode with webhook callback for document:", document_id);
-        const asyncResult = await analyzeWithOpenRouter(OPENROUTER_API_KEY, systemPrompt, file_url, file_name, crossReferenceContext, true, document_id);
-        
-        if (asyncResult.ok) {
-          // Async request accepted - webhook will handle the result
-          return new Response(JSON.stringify({
-            success: true,
-            document_id,
-            ai_provider: "openrouter-async",
-            status: "processing_async",
-            message: "Document submitted for async processing. Results will be delivered via webhook.",
-          }), {
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        } else {
-          console.log(`OpenRouter async failed (${asyncResult.status}), falling back to sync`);
-        }
-      }
-
-      // Sync mode with OpenRouter
-      console.log("Using OpenRouter (sync) for document analysis");
-      aiResponse = await analyzeWithOpenRouter(OPENROUTER_API_KEY, systemPrompt, file_url, file_name, crossReferenceContext);
-      aiProvider = "openrouter";
-
-      if (!aiResponse.ok) {
-        console.log(`OpenRouter returned ${aiResponse.status}, falling back`);
-        // Fall through to other providers
-        if (OPENAI_API_KEY) {
-          const openaiResult = await analyzeWithOpenAI(OPENAI_API_KEY, systemPrompt, file_url, file_name, crossReferenceContext);
-          if (openaiResult && openaiResult.ok) {
-            aiResponse = openaiResult;
-            aiProvider = "openai";
-          } else if (LOVABLE_API_KEY) {
-            aiResponse = await analyzeWithLovableAI(LOVABLE_API_KEY, systemPrompt, file_url, file_name, crossReferenceContext);
-            aiProvider = "lovable";
-          }
-        } else if (LOVABLE_API_KEY) {
-          aiResponse = await analyzeWithLovableAI(LOVABLE_API_KEY, systemPrompt, file_url, file_name, crossReferenceContext);
-          aiProvider = "lovable";
-        }
-      }
-    } else if (OPENAI_API_KEY) {
-      const openaiResult = await analyzeWithOpenAI(OPENAI_API_KEY, systemPrompt, file_url, file_name, crossReferenceContext);
-      if (openaiResult && openaiResult.ok) {
-        console.log("Using OpenAI Responses API with gpt-5.4 for document analysis");
-        aiProvider = "openai";
-        aiResponse = openaiResult;
+    // All AI processing goes through OpenRouter
+    if (async_mode) {
+      console.log(`Using OpenRouter ASYNC mode (model: ${aiModel}) for document:`, document_id);
+      const asyncResult = await analyzeWithOpenRouter(OPENROUTER_API_KEY, aiModel, systemPrompt, file_url, file_name, crossReferenceContext, true, document_id);
+      
+      if (asyncResult.ok) {
+        return new Response(JSON.stringify({
+          success: true,
+          document_id,
+          ai_provider: "openrouter-async",
+          ai_model: aiModel,
+          status: "processing_async",
+          message: "Document submitted for async processing. Results will be delivered via webhook.",
+        }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       } else {
-        aiProvider = "lovable";
-        aiResponse = await analyzeWithLovableAI(LOVABLE_API_KEY!, systemPrompt, file_url, file_name, crossReferenceContext);
+        console.log(`OpenRouter async failed (${asyncResult.status}), falling back to sync`);
       }
-    } else {
-      console.log("Using Lovable AI for document analysis");
-      aiResponse = await analyzeWithLovableAI(LOVABLE_API_KEY!, systemPrompt, file_url, file_name, crossReferenceContext);
     }
+
+    // Sync mode with OpenRouter
+    console.log(`Using OpenRouter (sync, model: ${aiModel}) for document analysis`);
+    aiResponse = await analyzeWithOpenRouter(OPENROUTER_API_KEY, aiModel, systemPrompt, file_url, file_name, crossReferenceContext);
 
     if (!aiResponse.ok) {
       const status = aiResponse.status;
