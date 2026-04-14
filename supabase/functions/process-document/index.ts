@@ -520,19 +520,25 @@ serve(async (req) => {
 
     if (!aiResponse.ok) {
       const status = aiResponse.status;
-      if (status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again shortly." }), {
-          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" }
-        });
-      }
       if (status === 402) {
-        return new Response(JSON.stringify({ error: "AI credits exhausted." }), {
+        return new Response(JSON.stringify({
+          error: "credits_exhausted",
+          message: "Your OpenRouter credits have been exhausted. Please top up your credits at openrouter.ai to continue processing documents.",
+        }), {
           status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" }
         });
       }
+      if (status === 429) {
+        return new Response(JSON.stringify({
+          error: "rate_limited",
+          message: "Rate limit reached. Please wait a moment and try again.",
+        }), {
+          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      }
       const errText = await aiResponse.text();
-      console.error(`${aiProvider} AI error:`, status, errText);
-      throw new Error(`${aiProvider} AI error: ${status}`);
+      console.error(`OpenRouter AI error (model: ${aiModel}):`, status, errText);
+      throw new Error(`OpenRouter AI error: ${status}`);
     }
 
     const aiData = await aiResponse.json();
@@ -676,6 +682,7 @@ serve(async (req) => {
         certification_authority: extracted.certification_authority || null,
         extracted_info: normalizeExtractedInfo(extracted.extracted_info) || null,
         ai_provider: aiProvider,
+        ai_model: aiModel,
         sa_id_validation: saIdValidation,
       },
       processed_at: new Date().toISOString(),
@@ -685,6 +692,7 @@ serve(async (req) => {
       success: true,
       document_id,
       ai_provider: aiProvider,
+      ai_model: aiModel,
       ...extracted,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
