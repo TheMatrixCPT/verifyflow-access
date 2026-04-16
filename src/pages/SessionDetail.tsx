@@ -1,21 +1,22 @@
 import { useState, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
-import { Upload, Download, Search, Users, CheckCircle, AlertTriangle, ArrowLeft } from "lucide-react";
+import { Upload, Download, ChevronDown, Search, Users, CheckCircle, AlertTriangle, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Header from "@/components/Header";
 import CandidateCard from "@/components/CandidateCard";
 import CandidateModal from "@/components/CandidateModal";
 import UploadModal from "@/components/UploadModal";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getSession, getCandidates, getDocuments, deleteCandidate } from "@/lib/api";
 import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
 import { toast } from "sonner";
-import { generateReport } from "@/lib/generateReport";
+import { generateReport, generateReportCsv } from "@/lib/generateReport";
 import { calculateValidationScore } from "@/lib/validationScore";
 import type { DocumentData, CandidateData } from "@/components/CandidateCard";
 
-type FilterType = "all" | "pass" | "warning" | "fail";
+type FilterType = "all" | "pass" | "fail";
 
 const SessionDetail = () => {
   const { id } = useParams<{ id: string }>();
@@ -127,6 +128,20 @@ const SessionDetail = () => {
     toast.success("PDF report downloaded");
   };
 
+  const handleDownloadCsv = () => {
+    if (candidatesWithDocs.length === 0) {
+      toast.error("No data to download");
+      return;
+    }
+    generateReportCsv({
+      sessionName: session?.name || "Report",
+      sessionDate: session ? format(new Date(session.created_at), "dd MMM yyyy, HH:mm") : "",
+      stats,
+      candidates: candidatesWithDocs,
+    });
+    toast.success("CSV report downloaded");
+  };
+
   const handleDeleteCandidate = async (candidateId: string) => {
     try {
       await deleteCandidate(candidateId);
@@ -184,9 +199,19 @@ const SessionDetail = () => {
             <Button variant="outline" onClick={() => setUploadOpen(true)}>
               <Upload className="h-4 w-4" /> Upload More
             </Button>
-            <Button variant="default" onClick={handleDownloadReport}>
-              <Download className="h-4 w-4" /> Download Report
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="default" className="gap-2">
+                  <Download className="h-4 w-4" />
+                  <span>Download Report</span>
+                  <ChevronDown className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" sideOffset={4} className="w-[220px]">
+                <DropdownMenuItem onSelect={handleDownloadReport}>Download as PDF</DropdownMenuItem>
+                <DropdownMenuItem onSelect={handleDownloadCsv}>Download as CSV</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
 
@@ -236,9 +261,9 @@ const SessionDetail = () => {
             <input type="text" className="vf-input pl-10 h-10" placeholder="Search by name or ID..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
           </div>
           <div className="flex items-center gap-2">
-            {(["all", "pass", "warning", "fail"] as FilterType[]).map((f) => (
+            {(["all", "pass", "fail"] as FilterType[]).map((f) => (
               <Button key={f} variant={filter === f ? "default" : "secondary"} size="sm" onClick={() => setFilter(f)}>
-                {f === "all" ? "All" : f === "pass" ? "Validated" : f === "warning" ? "Has Issues" : "Failed"}
+                {f === "all" ? "All" : f === "pass" ? "Validated" : "Failed"}
               </Button>
             ))}
             <span className="text-sm text-muted-foreground ml-2">Showing {filtered.length} candidates</span>

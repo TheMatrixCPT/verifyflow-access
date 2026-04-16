@@ -375,86 +375,11 @@ async function buildUserContent(fileUrl: string, fileName: string, crossReferenc
   }
 }
 
-function buildOpenAIResponsesInput(systemPrompt: string, userContent: any[], fileUrl: string, fileName: string) {
-  const developerContent = [
-    { type: "input_text", text: systemPrompt },
-  ];
-
-  if (isPdfFile(fileName)) {
-    return [
-      {
-        role: "developer",
-        content: developerContent,
-      },
-      {
-        role: "user",
-        content: [
-          {
-            type: "input_file",
-            file_url: fileUrl,
-            filename: fileName,
-          },
-          {
-            type: "input_text",
-            text: userContent.find((item) => item.type === "text")?.text || `Analyze this PDF document: ${fileName}`,
-          },
-        ],
-      },
-    ];
-  }
-
-  const mappedUserContent = userContent.map((item) => {
-    if (item.type === "text") {
-      return { type: "input_text", text: item.text };
-    }
-
-    if (item.type === "image_url") {
-      return {
-        type: "input_image",
-        image_url: item.image_url?.url || "",
-        detail: item.image_url?.detail,
-      };
-    }
-
-    return { type: "input_text", text: JSON.stringify(item) };
-  });
-
-  return [
-    {
-      role: "developer",
-      content: developerContent,
-    },
-    {
-      role: "user",
-      content: mappedUserContent,
-    },
-  ];
-}
-
-function extractToolCall(aiData: Record<string, any>) {
-  const chatCompletionsToolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
-  if (chatCompletionsToolCall) return chatCompletionsToolCall;
-
-  const responseOutput = Array.isArray(aiData.output) ? aiData.output : [];
-  const directFunctionCall = responseOutput.find((item) => item?.type === "function_call" && item?.name === "extract_document_info");
-  if (directFunctionCall) return directFunctionCall;
-
-  for (const item of responseOutput) {
-    const nestedFunctionCall = Array.isArray(item?.content)
-      ? item.content.find((contentItem: any) => contentItem?.type === "function_call" && contentItem?.name === "extract_document_info")
-      : null;
-
-    if (nestedFunctionCall) return nestedFunctionCall;
-  }
-
-  return null;
-}
-
-async function analyzeWithOpenRouter(apiKey: string, systemPrompt: string, fileUrl: string, fileName: string, crossReferenceContext: CrossReferenceContext, asyncMode: boolean = false, documentId?: string) {
+async function analyzeWithOpenRouter(apiKey: string, model: string, systemPrompt: string, fileUrl: string, fileName: string, crossReferenceContext: CrossReferenceContext, asyncMode: boolean = false, documentId?: string) {
   const userContent = await buildUserContent(fileUrl, fileName, crossReferenceContext);
 
   const body: Record<string, any> = {
-    model: "google/gemini-2.5-flash",
+    model,
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userContent }
@@ -486,64 +411,32 @@ async function analyzeWithOpenRouter(apiKey: string, systemPrompt: string, fileU
   return response;
 }
 
-async function analyzeWithOpenAI(apiKey: string, systemPrompt: string, fileUrl: string, fileName: string, crossReferenceContext: CrossReferenceContext) {
-  const userContent = await buildUserContent(fileUrl, fileName, crossReferenceContext);
-  const input = buildOpenAIResponsesInput(systemPrompt, userContent, fileUrl, fileName);
-
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "gpt-5.4",
-      input,
-      tools: [toolSchema],
-      tool_choice: {
-        type: "function",
-        name: "extract_document_info",
-      },
-    }),
-  });
-  return response;
-}
-
-async function analyzeWithLovableAI(apiKey: string, systemPrompt: string, fileUrl: string, fileName: string, crossReferenceContext: CrossReferenceContext) {
-  const userContent = await buildUserContent(fileUrl, fileName, crossReferenceContext);
-
-  const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "google/gemini-2.5-flash",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userContent }
-      ],
-      tools: [toolSchema],
-      tool_choice: { type: "function", function: { name: "extract_document_info" } }
-    }),
-  });
-  return response;
+function extractToolCall(aiData: Record<string, any>) {
+  const chatCompletionsToolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
+  if (chatCompletionsToolCall) return chatCompletionsToolCall;
+  return null;
 }
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { document_id, file_url, file_name, async_mode } = await req.json();
+    const { document_id, file_url, file_name, async_mode, model } = await req.json();
 
     const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
 
-    if (!OPENROUTER_API_KEY && !LOVABLE_API_KEY && !OPENAI_API_KEY) {
-      throw new Error("No AI API key configured. Need OPENROUTER_API_KEY, LOVABLE_API_KEY, or OPENAI_API_KEY.");
+    if (!OPENROUTER_API_KEY) {
+      return new Response(JSON.stringify({
+        error: "api_key_missing",
+        message: "OpenRouter API key is not configured. Please add your OPENROUTER_API_KEY to continue processing documents.",
+      }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
+
+    // Default model is Gemini 2.5 Flash, can be overridden to e.g. "openai/gpt-5.4"
+    const aiModel = model || "google/gemini-2.5-flash";
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -600,81 +493,52 @@ serve(async (req) => {
     let aiResponse: Response;
     let aiProvider = "openrouter";
 
-    // Priority: OpenRouter > OpenAI > Lovable AI
-    // For async_mode (batch processing), use OpenRouter webhooks
-    if (OPENROUTER_API_KEY) {
-      if (async_mode) {
-        console.log("Using OpenRouter ASYNC mode with webhook callback for document:", document_id);
-        const asyncResult = await analyzeWithOpenRouter(OPENROUTER_API_KEY, systemPrompt, file_url, file_name, crossReferenceContext, true, document_id);
-        
-        if (asyncResult.ok) {
-          // Async request accepted - webhook will handle the result
-          return new Response(JSON.stringify({
-            success: true,
-            document_id,
-            ai_provider: "openrouter-async",
-            status: "processing_async",
-            message: "Document submitted for async processing. Results will be delivered via webhook.",
-          }), {
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        } else {
-          console.log(`OpenRouter async failed (${asyncResult.status}), falling back to sync`);
-        }
-      }
-
-      // Sync mode with OpenRouter
-      console.log("Using OpenRouter (sync) for document analysis");
-      aiResponse = await analyzeWithOpenRouter(OPENROUTER_API_KEY, systemPrompt, file_url, file_name, crossReferenceContext);
-      aiProvider = "openrouter";
-
-      if (!aiResponse.ok) {
-        console.log(`OpenRouter returned ${aiResponse.status}, falling back`);
-        // Fall through to other providers
-        if (OPENAI_API_KEY) {
-          const openaiResult = await analyzeWithOpenAI(OPENAI_API_KEY, systemPrompt, file_url, file_name, crossReferenceContext);
-          if (openaiResult && openaiResult.ok) {
-            aiResponse = openaiResult;
-            aiProvider = "openai";
-          } else if (LOVABLE_API_KEY) {
-            aiResponse = await analyzeWithLovableAI(LOVABLE_API_KEY, systemPrompt, file_url, file_name, crossReferenceContext);
-            aiProvider = "lovable";
-          }
-        } else if (LOVABLE_API_KEY) {
-          aiResponse = await analyzeWithLovableAI(LOVABLE_API_KEY, systemPrompt, file_url, file_name, crossReferenceContext);
-          aiProvider = "lovable";
-        }
-      }
-    } else if (OPENAI_API_KEY) {
-      const openaiResult = await analyzeWithOpenAI(OPENAI_API_KEY, systemPrompt, file_url, file_name, crossReferenceContext);
-      if (openaiResult && openaiResult.ok) {
-        console.log("Using OpenAI Responses API with gpt-5.4 for document analysis");
-        aiProvider = "openai";
-        aiResponse = openaiResult;
+    // All AI processing goes through OpenRouter
+    if (async_mode) {
+      console.log(`Using OpenRouter ASYNC mode (model: ${aiModel}) for document:`, document_id);
+      const asyncResult = await analyzeWithOpenRouter(OPENROUTER_API_KEY, aiModel, systemPrompt, file_url, file_name, crossReferenceContext, true, document_id);
+      
+      if (asyncResult.ok) {
+        return new Response(JSON.stringify({
+          success: true,
+          document_id,
+          ai_provider: "openrouter-async",
+          ai_model: aiModel,
+          status: "processing_async",
+          message: "Document submitted for async processing. Results will be delivered via webhook.",
+        }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       } else {
-        aiProvider = "lovable";
-        aiResponse = await analyzeWithLovableAI(LOVABLE_API_KEY!, systemPrompt, file_url, file_name, crossReferenceContext);
+        console.log(`OpenRouter async failed (${asyncResult.status}), falling back to sync`);
       }
-    } else {
-      console.log("Using Lovable AI for document analysis");
-      aiResponse = await analyzeWithLovableAI(LOVABLE_API_KEY!, systemPrompt, file_url, file_name, crossReferenceContext);
     }
+
+    // Sync mode with OpenRouter
+    console.log(`Using OpenRouter (sync, model: ${aiModel}) for document analysis`);
+    aiResponse = await analyzeWithOpenRouter(OPENROUTER_API_KEY, aiModel, systemPrompt, file_url, file_name, crossReferenceContext);
 
     if (!aiResponse.ok) {
       const status = aiResponse.status;
-      if (status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again shortly." }), {
-          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" }
-        });
-      }
       if (status === 402) {
-        return new Response(JSON.stringify({ error: "AI credits exhausted." }), {
+        return new Response(JSON.stringify({
+          error: "credits_exhausted",
+          message: "Your OpenRouter credits have been exhausted. Please top up your credits at openrouter.ai to continue processing documents.",
+        }), {
           status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" }
         });
       }
+      if (status === 429) {
+        return new Response(JSON.stringify({
+          error: "rate_limited",
+          message: "Rate limit reached. Please wait a moment and try again.",
+        }), {
+          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      }
       const errText = await aiResponse.text();
-      console.error(`${aiProvider} AI error:`, status, errText);
-      throw new Error(`${aiProvider} AI error: ${status}`);
+      console.error(`OpenRouter AI error (model: ${aiModel}):`, status, errText);
+      throw new Error(`OpenRouter AI error: ${status}`);
     }
 
     const aiData = await aiResponse.json();
@@ -818,6 +682,7 @@ serve(async (req) => {
         certification_authority: extracted.certification_authority || null,
         extracted_info: normalizeExtractedInfo(extracted.extracted_info) || null,
         ai_provider: aiProvider,
+        ai_model: aiModel,
         sa_id_validation: saIdValidation,
       },
       processed_at: new Date().toISOString(),
@@ -827,6 +692,7 @@ serve(async (req) => {
       success: true,
       document_id,
       ai_provider: aiProvider,
+      ai_model: aiModel,
       ...extracted,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

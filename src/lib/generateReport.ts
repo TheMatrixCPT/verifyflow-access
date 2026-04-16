@@ -270,3 +270,100 @@ export function generateReport(data: ReportData) {
 
   doc.save(`${data.sessionName}-report-${format(new Date(), "yyyy-MM-dd")}.pdf`);
 }
+
+function csvEscape(value: unknown) {
+  const text = value === undefined || value === null ? "" : String(value);
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function buildCsvRow(values: unknown[]) {
+  return values.map(csvEscape).join(",");
+}
+
+export function generateReportCsv(data: ReportData) {
+  const rows: string[] = [];
+
+  rows.push(buildCsvRow(["VerifyFlow AI Document Validation Report"]));
+  rows.push(buildCsvRow(["Generated", format(new Date(), "dd MMM yyyy, HH:mm")]));
+  rows.push(buildCsvRow(["Session", data.sessionName]));
+  rows.push(buildCsvRow(["Date", data.sessionDate]));
+  rows.push("");
+  rows.push(buildCsvRow(["Total Candidates", data.stats.total]));
+  rows.push(buildCsvRow(["Validated", data.stats.validated]));
+  rows.push(buildCsvRow(["Pass Rate", `${data.stats.complete}%`]));
+  rows.push(buildCsvRow(["Issues Found", data.stats.issues]));
+  rows.push("");
+  rows.push(
+    buildCsvRow([
+      "Candidate Name",
+      "Candidate Status",
+      "Candidate Score",
+      "Candidate Summary",
+      "Candidate Issues",
+      "Document File Name",
+      "Document Type",
+      "Document Status",
+      "Confidence",
+      "Document Issues",
+      "Document Checks",
+    ]),
+  );
+
+  data.candidates.forEach((candidate) => {
+    const candidateSummary = normalizeBirthDateText(candidate.summary || "");
+    const candidateIssues = (candidate.issues || []).join("; ");
+
+    if (candidate.documents.length === 0) {
+      rows.push(
+        buildCsvRow([
+          candidate.name,
+          statusLabel(candidate.status),
+          `${candidate.score}%`,
+          candidateSummary,
+          candidateIssues,
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+        ]),
+      );
+      return;
+    }
+
+    candidate.documents.forEach((document) => {
+      const documentIssues = (document.issues || []).join("; ");
+      const checks = (document.checks || [])
+        .map((check) => `${check.name}: ${statusLabel(check.status)} - ${normalizeBirthDateText(check.detail)}`)
+        .join("; ");
+
+      rows.push(
+        buildCsvRow([
+          candidate.name,
+          statusLabel(candidate.status),
+          `${candidate.score}%`,
+          candidateSummary,
+          candidateIssues,
+          document.fileName,
+          document.type,
+          statusLabel(document.status),
+          `${document.confidence}%`,
+          documentIssues,
+          checks,
+        ]),
+      );
+    });
+  });
+
+  const csvContent = rows.join("\r\n");
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.setAttribute("download", `${data.sessionName}-report-${format(new Date(), "yyyy-MM-dd")}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}

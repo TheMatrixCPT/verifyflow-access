@@ -1,28 +1,20 @@
 import { useState, useEffect } from "react";
-import { ArrowLeft, ChevronDown, ChevronUp, Loader2, Check } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronUp, Loader2, ExternalLink } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import Header from "@/components/Header";
 import { toast } from "sonner";
 import { getSettings, updateSettings } from "@/lib/api";
-import { supabase } from "@/integrations/supabase/client";
 
 const Settings = () => {
   const [confidence, setConfidence] = useState(80);
   const [stampValidity, setStampValidity] = useState(3);
   const [strictMode, setStrictMode] = useState(false);
   const [fromEmail, setFromEmail] = useState("");
-  const [apiExpanded, setApiExpanded] = useState(false);
   const [emailExpanded, setEmailExpanded] = useState(false);
+  const [apiExpanded, setApiExpanded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-
-  // API key state
-  const [openaiKey, setOpenaiKey] = useState("");
-  const [falKey, setFalKey] = useState("");
-  const [googleVisionKey, setGoogleVisionKey] = useState("");
-  const [awsTextractKey, setAwsTextractKey] = useState("");
-  const [apiKeysConfigured, setApiKeysConfigured] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     loadSettings();
@@ -30,18 +22,12 @@ const Settings = () => {
 
   const loadSettings = async () => {
     try {
-      const [settings, apiKeysResult] = await Promise.all([
-        getSettings(),
-        supabase.functions.invoke("manage-api-keys", { method: "GET" }),
-      ]);
+      const settings = await getSettings();
       if (settings) {
         setConfidence(settings.confidence_threshold);
         setStampValidity(settings.stamp_validity_months);
         setStrictMode(settings.strict_mode);
         setFromEmail(settings.from_email || "");
-      }
-      if (apiKeysResult.data?.apiKeys) {
-        setApiKeysConfigured(apiKeysResult.data.apiKeys);
       }
     } catch (e) {
       console.error("Failed to load settings:", e);
@@ -53,48 +39,12 @@ const Settings = () => {
   const handleSave = async () => {
     setSaving(true);
     try {
-      // Save general settings and API keys in parallel
-      const apiKeysPayload: Record<string, string> = {};
-      if (openaiKey) apiKeysPayload.openai = openaiKey;
-      if (falKey) apiKeysPayload.fal = falKey;
-      if (googleVisionKey) apiKeysPayload.google_vision = googleVisionKey;
-      if (awsTextractKey) apiKeysPayload.aws_textract = awsTextractKey;
-
-      const promises: Promise<any>[] = [
-        updateSettings({
-          confidence_threshold: confidence,
-          stamp_validity_months: stampValidity,
-          strict_mode: strictMode,
-          from_email: fromEmail || undefined,
-        }),
-      ];
-
-      if (Object.keys(apiKeysPayload).length > 0) {
-        promises.push(
-          supabase.functions.invoke("manage-api-keys", {
-            method: "POST",
-            body: apiKeysPayload,
-          })
-        );
-      }
-
-      await Promise.all(promises);
-
-      // Update configured status and clear inputs
-      if (Object.keys(apiKeysPayload).length > 0) {
-        setApiKeysConfigured(prev => ({
-          ...prev,
-          ...(openaiKey ? { openai: true } : {}),
-          ...(falKey ? { fal: true } : {}),
-          ...(googleVisionKey ? { google_vision: true } : {}),
-          ...(awsTextractKey ? { aws_textract: true } : {}),
-        }));
-        setOpenaiKey("");
-        setFalKey("");
-        setGoogleVisionKey("");
-        setAwsTextractKey("");
-      }
-
+      await updateSettings({
+        confidence_threshold: confidence,
+        stamp_validity_months: stampValidity,
+        strict_mode: strictMode,
+        from_email: fromEmail || undefined,
+      });
       toast.success("Settings saved successfully. Changes will apply to all future validations.");
     } catch (e) {
       console.error("Failed to save settings:", e);
@@ -181,68 +131,48 @@ const Settings = () => {
           </div>
         </div>
 
-        {/* API Configuration */}
+        {/* AI Provider */}
         <div className="vf-card mb-6">
           <button className="w-full flex items-center justify-between" onClick={() => setApiExpanded(!apiExpanded)}>
-            <h2 className="text-xl font-semibold text-space-kadet">API Configuration</h2>
+            <h2 className="text-xl font-semibold text-space-kadet">AI Provider</h2>
             {apiExpanded ? <ChevronUp className="h-5 w-5 text-muted-foreground" /> : <ChevronDown className="h-5 w-5 text-muted-foreground" />}
           </button>
-        {apiExpanded && (
-            <div className="mt-6 space-y-6">
+          {apiExpanded && (
+            <div className="mt-6 space-y-4">
               <div className="p-4 bg-muted/50 rounded-lg border border-border">
                 <div className="flex items-center gap-2 mb-1">
                   <span className="text-xs font-semibold text-success bg-success/10 px-2 py-0.5 rounded-full">Active</span>
-                  <span className="text-sm font-semibold text-space-kadet">Lovable AI (Built-in)</span>
+                  <span className="text-sm font-semibold text-space-kadet">OpenRouter</span>
                 </div>
-                <p className="vf-helper mb-0">Pre-configured AI gateway. Powers document analysis with Gemini & GPT models. No API key needed.</p>
+                <p className="text-sm text-muted-foreground mt-1">All document analysis is powered through OpenRouter. Manage your models and billing from the OpenRouter dashboard.</p>
               </div>
 
               <div className="border-t border-border pt-4">
-                <p className="text-sm font-semibold text-space-kadet mb-3">Additional AI Providers (Optional)</p>
-                <p className="vf-helper mb-4">Connect additional providers for enhanced image extraction, OCR, and document parsing capabilities.</p>
-
-                <div className="space-y-4">
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <label className="vf-label mb-0">OpenAI API Key</label>
-                      {apiKeysConfigured.openai && <span className="flex items-center gap-1 text-xs text-success"><Check className="h-3 w-3" /> Configured</span>}
-                    </div>
-                    <input type="password" className="vf-input" placeholder={apiKeysConfigured.openai ? "••••••••••••" : "sk-..."} value={openaiKey} onChange={(e) => setOpenaiKey(e.target.value)} />
-                    <p className="vf-helper">GPT-4o Vision for enhanced image analysis and document understanding</p>
+                <p className="text-sm font-semibold text-space-kadet mb-2">Supported Models</p>
+                <div className="space-y-2 text-sm text-muted-foreground">
+                  <div className="flex items-center justify-between">
+                    <span>google/gemini-2.5-flash</span>
+                    <span className="text-xs bg-muted px-2 py-0.5 rounded">Default — ~$0.001–$0.005/doc</span>
                   </div>
-
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <label className="vf-label mb-0">Fal.ai API Key</label>
-                      {apiKeysConfigured.fal && <span className="flex items-center gap-1 text-xs text-success"><Check className="h-3 w-3" /> Configured</span>}
-                    </div>
-                    <input type="password" className="vf-input" placeholder={apiKeysConfigured.fal ? "••••••••••••" : "fal-..."} value={falKey} onChange={(e) => setFalKey(e.target.value)} />
-                    <p className="vf-helper">Fast image processing, OCR, and visual document extraction</p>
-                  </div>
-
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <label className="vf-label mb-0">Google Cloud Vision API Key</label>
-                      {apiKeysConfigured.google_vision && <span className="flex items-center gap-1 text-xs text-success"><Check className="h-3 w-3" /> Configured</span>}
-                    </div>
-                    <input type="password" className="vf-input" placeholder={apiKeysConfigured.google_vision ? "••••••••••••" : "AIza-..."} value={googleVisionKey} onChange={(e) => setGoogleVisionKey(e.target.value)} />
-                    <p className="vf-helper">Advanced OCR, handwriting recognition, and stamp/seal detection</p>
-                  </div>
-
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <label className="vf-label mb-0">AWS Textract Access Key</label>
-                      {apiKeysConfigured.aws_textract && <span className="flex items-center gap-1 text-xs text-success"><Check className="h-3 w-3" /> Configured</span>}
-                    </div>
-                    <input type="password" className="vf-input" placeholder={apiKeysConfigured.aws_textract ? "••••••••••••" : "AKIA..."} value={awsTextractKey} onChange={(e) => setAwsTextractKey(e.target.value)} />
-                    <p className="vf-helper">Table extraction, form parsing, and structured data extraction from documents</p>
+                  <div className="flex items-center justify-between">
+                    <span>openai/gpt-5.4</span>
+                    <span className="text-xs bg-muted px-2 py-0.5 rounded">Premium — ~$0.02–$0.10/doc</span>
                   </div>
                 </div>
               </div>
 
               <div className="border-t border-border pt-4">
-                <p className="text-xs text-muted-foreground">
-                  These keys are stored securely and used server-side only. The built-in Lovable AI handles all core validation. Additional providers enhance specific capabilities like handwriting OCR, stamp detection, and table extraction.
+                <a
+                  href="https://openrouter.ai/settings/credits"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-sm text-purple hover:underline"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  Manage credits on OpenRouter
+                </a>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Your API key is stored securely as a backend secret. All AI processing goes through OpenRouter — switch models or manage billing from their dashboard.
                 </p>
               </div>
             </div>
