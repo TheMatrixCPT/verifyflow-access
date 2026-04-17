@@ -42,28 +42,27 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const login = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
     try {
-      // Fetch admin user by email
-      const { data: adminData, error: fetchError } = await supabase
-        .from("admin_users")
-        .select("*")
-        .eq("email", email.toLowerCase().trim())
-        .single();
+      const { data, error } = await (supabase.rpc as any)("verify_admin_login", {
+        _email: email.toLowerCase().trim(),
+        _password: password,
+      });
 
-      if (fetchError || !adminData) {
-        return { success: false, error: "Invalid email or password" };
+      if (error) {
+        console.error("Login RPC error:", error);
+        return { success: false, error: "Login failed. Please try again." };
       }
 
-      // Simple password comparison for demo
-      if (adminData.password_hash !== password) {
+      const row = Array.isArray(data) ? data[0] : data;
+      if (!row) {
         return { success: false, error: "Invalid email or password" };
       }
 
       const adminUser: AdminUser = {
-        id: adminData.id,
-        email: adminData.email,
-        name: adminData.name,
-        surname: adminData.surname,
-        can_access_settings: adminData.can_access_settings,
+        id: row.id,
+        email: row.email,
+        name: row.name,
+        surname: row.surname,
+        can_access_settings: row.can_access_settings,
       };
 
       localStorage.setItem("admin_user", JSON.stringify(adminUser));

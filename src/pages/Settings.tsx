@@ -52,13 +52,9 @@ const Settings = () => {
   const loadAdmins = async () => {
     setLoadingAdmins(true);
     try {
-      const { data, error } = await supabase
-        .from("admin_users")
-        .select("id, email, name, surname, can_access_settings")
-        .order("created_at", { ascending: true });
-      
+      const { data, error } = await (supabase.rpc as any)("list_admin_users");
       if (error) throw error;
-      setAdmins(data || []);
+      setAdmins((data as AdminUser[]) || []);
     } catch (e) {
       console.error("Failed to load admins:", e);
     } finally {
@@ -78,17 +74,20 @@ const Settings = () => {
       return;
     }
 
+    if (newAdmin.password.length < 8) {
+      toast.error("Password must be at least 8 characters");
+      return;
+    }
+
     setAddingAdmin(true);
     try {
-      const { error } = await supabase
-        .from("admin_users")
-        .insert({
-          email: newAdmin.email.toLowerCase().trim(),
-          password_hash: newAdmin.password,
-          name: newAdmin.name.trim(),
-          surname: newAdmin.surname.trim(),
-          can_access_settings: newAdmin.can_access_settings,
-        });
+      const { error } = await (supabase.rpc as any)("create_admin_user", {
+        _email: newAdmin.email.toLowerCase().trim(),
+        _name: newAdmin.name.trim(),
+        _surname: newAdmin.surname.trim(),
+        _password: newAdmin.password,
+        _can_access_settings: newAdmin.can_access_settings,
+      });
 
       if (error) throw error;
 
@@ -120,10 +119,7 @@ const Settings = () => {
     }
 
     try {
-      const { error } = await supabase
-        .from("admin_users")
-        .delete()
-        .eq("id", adminId);
+      const { error } = await (supabase.rpc as any)("delete_admin_user", { _id: adminId });
 
       if (error) throw error;
 
