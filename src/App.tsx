@@ -7,6 +7,7 @@ import { AuthProvider, useAuth } from "@/context/AuthContext";
 import Index from "./pages/Index";
 import SessionDetail from "./pages/SessionDetail";
 import Settings from "./pages/Settings";
+import Assessment from "./pages/Assessment";
 import NotFound from "./pages/NotFound";
 import Login from "./pages/Login";
 
