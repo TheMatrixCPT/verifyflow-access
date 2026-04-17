@@ -1,8 +1,17 @@
-import { Settings, Search } from "lucide-react";
+import { Settings, Search, LogOut, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { useAuth } from "@/context/AuthContext";
 
 const Header = () => {
+  const { admin, logout } = useAuth();
+  const navigate = useNavigate();
+
+  const handleLogout = async () => {
+    await logout();
+    navigate("/login");
+  };
+
   return (
     <header className="bg-card h-[64px] px-6 flex items-center justify-between border-b border-border">
       <Link to="/" className="flex items-center gap-2.5">
@@ -23,11 +32,33 @@ const Header = () => {
         </div>
       </div>
 
-      <Link to="/settings">
-        <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground">
-          <Settings className="h-5 w-5" />
+      <div className="flex items-center gap-4">
+        {/* Admin Name Display */}
+        {admin && (
+          <div className="flex items-center gap-2 text-sm text-foreground">
+            <User className="h-4 w-4 text-muted-foreground" />
+            <span className="font-medium">{admin.name} {admin.surname}</span>
+          </div>
+        )}
+
+        {admin?.can_access_settings && (
+          <Link to="/settings">
+            <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground">
+              <Settings className="h-5 w-5" />
+            </Button>
+          </Link>
+        )}
+
+        <Button
+          variant="ghost"
+          size="icon"
+          className="text-muted-foreground hover:text-foreground"
+          onClick={handleLogout}
+          title="Sign out"
+        >
+          <LogOut className="h-5 w-5" />
         </Button>
-      </Link>
+      </div>
     </header>
   );
 };

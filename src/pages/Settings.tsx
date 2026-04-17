@@ -1,24 +1,139 @@
 import { useState, useEffect } from "react";
-import { ArrowLeft, ChevronDown, ChevronUp, Loader2, ExternalLink } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronUp, Loader2, ExternalLink, Plus, Trash2, UserPlus } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import Header from "@/components/Header";
 import { toast } from "sonner";
 import { getSettings, updateSettings } from "@/lib/api";
+import { useAuth, AdminUser } from "@/context/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
+
+interface NewAdmin {
+  email: string;
+  name: string;
+  surname: string;
+  password: string;
+  can_access_settings: boolean;
+}
 
 const Settings = () => {
+  const { admin: currentAdmin } = useAuth();
   const [confidence, setConfidence] = useState(80);
   const [stampValidity, setStampValidity] = useState(3);
   const [strictMode, setStrictMode] = useState(false);
   const [fromEmail, setFromEmail] = useState("");
   const [emailExpanded, setEmailExpanded] = useState(false);
   const [apiExpanded, setApiExpanded] = useState(false);
+  const [adminExpanded, setAdminExpanded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  
+  // Admin management state
+  const [admins, setAdmins] = useState<AdminUser[]>([]);
+  const [loadingAdmins, setLoadingAdmins] = useState(false);
+  const [newAdmin, setNewAdmin] = useState<NewAdmin>({
+    email: "",
+    name: "",
+    surname: "",
+    password: "",
+    can_access_settings: false,
+  });
+  const [addingAdmin, setAddingAdmin] = useState(false);
 
   useEffect(() => {
     loadSettings();
+    if (currentAdmin?.can_access_settings) {
+      loadAdmins();
+    }
   }, []);
+
+  const loadAdmins = async () => {
+    setLoadingAdmins(true);
+    try {
+      const { data, error } = await supabase
+        .from("admin_users")
+        .select("id, email, name, surname, can_access_settings")
+        .order("created_at", { ascending: true });
+      
+      if (error) throw error;
+      setAdmins(data || []);
+    } catch (e) {
+      console.error("Failed to load admins:", e);
+    } finally {
+      setLoadingAdmins(false);
+    }
+  };
+
+  const handleAddAdmin = async () => {
+    if (!newAdmin.email || !newAdmin.name || !newAdmin.surname || !newAdmin.password) {
+      toast.error("Please fill in all fields");
+      return;
+    }
+
+    // Validate email format
+    if (!newAdmin.email.toLowerCase().endsWith("@capaciti.org.za")) {
+      toast.error("Email must be a CAPACITI email (name.surname@capaciti.org.za)");
+      return;
+    }
+
+    setAddingAdmin(true);
+    try {
+      const { error } = await supabase
+        .from("admin_users")
+        .insert({
+          email: newAdmin.email.toLowerCase().trim(),
+          password_hash: newAdmin.password,
+          name: newAdmin.name.trim(),
+          surname: newAdmin.surname.trim(),
+          can_access_settings: newAdmin.can_access_settings,
+        });
+
+      if (error) throw error;
+
+      toast.success("Admin added successfully");
+      setNewAdmin({
+        email: "",
+        name: "",
+        surname: "",
+        password: "",
+        can_access_settings: false,
+      });
+      loadAdmins();
+    } catch (e: any) {
+      console.error("Failed to add admin:", e);
+      if (e.code === "23505") {
+        toast.error("An admin with this email already exists");
+      } else {
+        toast.error("Failed to add admin");
+      }
+    } finally {
+      setAddingAdmin(false);
+    }
+  };
+
+  const handleDeleteAdmin = async (adminId: string) => {
+    if (adminId === currentAdmin?.id) {
+      toast.error("You cannot delete yourself");
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from("admin_users")
+        .delete()
+        .eq("id", adminId);
+
+      if (error) throw error;
+
+      toast.success("Admin removed successfully");
+      loadAdmins();
+    } catch (e) {
+      console.error("Failed to delete admin:", e);
+      toast.error("Failed to remove admin");
+    }
+  };
 
   const loadSettings = async () => {
     try {
@@ -201,6 +316,144 @@ const Settings = () => {
             </div>
           )}
         </div>
+
+        {/* Admin Management - Only visible to admins with settings access */}
+        {currentAdmin?.can_access_settings && (
+          <div className="vf-card mb-8">
+            <button className="w-full flex items-center justify-between" onClick={() => setAdminExpanded(!adminExpanded)}>
+              <h2 className="text-xl font-semibold text-space-kadet">Admin Management</h2>
+              {adminExpanded ? <ChevronUp className="h-5 w-5 text-muted-foreground" /> : <ChevronDown className="h-5 w-5 text-muted-foreground" />}
+            </button>
+            {adminExpanded && (
+              <div className="mt-6 space-y-6">
+                {/* Add New Admin Form */}
+                <div className="p-4 bg-muted/50 rounded-lg border border-border">
+                  <h3 className="font-semibold text-space-kadet mb-4 flex items-center gap-2">
+                    <UserPlus className="h-4 w-4" />
+                    Add New Admin
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="vf-label">Email</label>
+                      <Input
+                        type="email"
+                        placeholder="name.surname@capaciti.org.za"
+                        value={newAdmin.email}
+                        onChange={(e) => setNewAdmin({ ...newAdmin, email: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <label className="vf-label">Password</label>
+                      <Input
+                        type="password"
+                        placeholder="Enter password"
+                        value={newAdmin.password}
+                        onChange={(e) => setNewAdmin({ ...newAdmin, password: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <label className="vf-label">Name</label>
+                      <Input
+                        placeholder="Name"
+                        value={newAdmin.name}
+                        onChange={(e) => setNewAdmin({ ...newAdmin, name: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <label className="vf-label">Surname</label>
+                      <Input
+                        placeholder="Surname"
+                        value={newAdmin.surname}
+                        onChange={(e) => setNewAdmin({ ...newAdmin, surname: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 mt-4">
+                    <Checkbox
+                      id="canAccessSettings"
+                      checked={newAdmin.can_access_settings}
+                      onCheckedChange={(checked) => setNewAdmin({ ...newAdmin, can_access_settings: checked as boolean })}
+                    />
+                    <label htmlFor="canAccessSettings" className="text-sm text-foreground cursor-pointer">
+                      Can access Settings
+                    </label>
+                  </div>
+                  <Button
+                    className="mt-4"
+                    onClick={handleAddAdmin}
+                    disabled={addingAdmin}
+                  >
+                    {addingAdmin ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                        Adding...
+                      </>
+                    ) : (
+                      <>
+                        <Plus className="h-4 w-4 mr-2" />
+                        Add Admin
+                      </>
+                    )}
+                  </Button>
+                </div>
+
+                {/* Existing Admins List */}
+                <div>
+                  <h3 className="font-semibold text-space-kadet mb-4">Existing Admins</h3>
+                  {loadingAdmins ? (
+                    <div className="flex items-center justify-center py-4">
+                      <Loader2 className="h-5 w-5 text-purple animate-spin" />
+                    </div>
+                  ) : admins.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No other admins found</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {admins.map((admin) => (
+                        <div
+                          key={admin.id}
+                          className="flex items-center justify-between p-3 bg-muted/30 rounded-lg border border-border"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-full bg-purple/20 flex items-center justify-center">
+                              <span className="text-sm font-semibold text-purple">
+                                {admin.name.charAt(0)}{admin.surname.charAt(0)}
+                              </span>
+                            </div>
+                            <div>
+                              <p className="font-medium text-foreground">{admin.name} {admin.surname}</p>
+                              <p className="text-sm text-muted-foreground">{admin.email}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            {admin.can_access_settings ? (
+                              <span className="text-xs bg-purple/10 text-purple px-2 py-1 rounded-full">
+                                Settings Access
+                              </span>
+                            ) : (
+                              <span className="text-xs bg-muted text-muted-foreground px-2 py-1 rounded-full">
+                                No Settings
+                              </span>
+                            )}
+                            {admin.id !== currentAdmin?.id && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="text-muted-foreground hover:text-destructive"
+                                onClick={() => handleDeleteAdmin(admin.id)}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         <Button variant="default" size="lg" className="w-full" onClick={handleSave} disabled={saving}>
           {saving ? (
