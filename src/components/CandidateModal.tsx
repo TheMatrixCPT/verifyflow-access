@@ -1,11 +1,13 @@
 import { useState } from "react";
-import { CheckCircle, AlertTriangle, XCircle, FileText, Eye, ExternalLink, Clock, Loader2, ChevronDown, User, Hash, Calendar, MapPin, Phone, Mail, Briefcase, GraduationCap, Building, ShieldCheck, Upload } from "lucide-react";
+import { CheckCircle, AlertTriangle, XCircle, FileText, Eye, ExternalLink, Clock, Loader2, ChevronDown, User, Hash, Calendar, MapPin, Phone, Mail, Briefcase, GraduationCap, Building, ShieldCheck, Upload, Download } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { formatDateToDayMonthYear, normalizeBirthDateText } from "@/lib/dateFormatting";
 import type { CandidateData, DocumentData } from "@/components/CandidateCard";
+import jsPDF from "jspdf";
 
 const statusConfig = {
   pass: { badge: "vf-badge-success", label: "Pass", icon: CheckCircle, iconColor: "text-success" },
@@ -59,7 +61,7 @@ const InfoRow = ({ icon: Icon, label, value }: { icon: React.ElementType; label:
   );
 };
 
-const DocumentSection = ({ doc, onReplaceDocument }: { doc: DocumentData; onReplaceDocument?: (doc: DocumentData) => void }) => {
+const DocumentSection = ({ doc, onReplaceDocument, candidateName }: { doc: DocumentData; onReplaceDocument?: (doc: DocumentData) => void; candidateName?: string }) => {
   const [expanded, setExpanded] = useState(false);
   const [viewingDoc, setViewingDoc] = useState(false);
   const docCfg = docStatusIcon[doc.status];
@@ -78,6 +80,127 @@ const DocumentSection = ({ doc, onReplaceDocument }: { doc: DocumentData; onRepl
       toast.error("Failed to open document");
     } finally {
       setViewingDoc(false);
+    }
+  };
+
+  const handleDownloadPdf = async (candidateName: string, doc: DocumentData) => {
+    try {
+      // Get the file from storage
+      if (!doc.filePath) {
+        toast.error("Document file not found");
+        return;
+      }
+
+      const { data: signedData, error: urlError } = await supabase.storage
+        .from("documents")
+        .createSignedUrl(doc.filePath, 60);
+
+      if (urlError || !signedData?.signedUrl) {
+        toast.error("Could not generate download link");
+        return;
+      }
+
+      // Fetch the file as blob
+      const response = await fetch(signedData.signedUrl);
+      if (!response.ok) throw new Error("Failed to fetch file");
+      const blob = await response.blob();
+
+      // Create download link
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      
+      // Generate filename: CandidateName_Surname_DocumentType.pdf
+      const nameParts = candidateName.split(" ");
+      const surname = nameParts.length > 1 ? nameParts.pop() : "";
+      const firstName = nameParts.join(" ");
+      const docTypeSanitized = doc.type.replace(/[^a-zA-Z0-9]/g, "_");
+      link.download = `${firstName}_${surname}_${docTypeSanitized}.pdf`;
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      toast.success("Document downloaded");
+    } catch (error) {
+      console.error("Download error:", error);
+      toast.error("Failed to download document");
+    }
+  };
+
+  const handleDownloadCsv = (candidateName: string, doc: DocumentData) => {
+    try {
+      // Generate filename: CandidateName_Surname_DocumentType.csv
+      const nameParts = candidateName.split(" ");
+      const surname = nameParts.length > 1 ? nameParts.pop() : "";
+      const firstName = nameParts.join(" ");
+      const docTypeSanitized = doc.type.replace(/[^a-zA-Z0-9]/g, "_");
+
+      // Build CSV content
+      const rows: string[] = [];
+      
+      // Header
+      rows.push("Document Validation Report");
+      rows.push("");
+      
+      // Document Info
+      rows.push("Document Information");
+      rows.push("Candidate Name," + candidateName);
+      rows.push("Document Type," + doc.type);
+      rows.push("File Name," + doc.fileName);
+      rows.push("Status," + doc.status.toUpperCase());
+      rows.push("Confidence Score," + doc.confidence + "%");
+      rows.push("");
+      
+      // Validation Checks
+      rows.push("Validation Checks");
+      rows.push("Check Name,Status,Details");
+      
+      if (doc.checks && doc.checks.length > 0) {
+        doc.checks.forEach(check => {
+          rows.push(`"${check.name}","${check.status}","${check.detail}"`);
+        });
+      } else {
+        rows.push("No detailed checks available");
+      }
+      
+      rows.push("");
+      
+      // Issues (if any)
+      if (doc.issues && doc.issues.length > 0) {
+        rows.push("Issues");
+        doc.issues.forEach(issue => {
+          rows.push(`"${issue}"`);
+        });
+      } else {
+        rows.push("Issues,None");
+      }
+      
+      rows.push("");
+      
+      // Summary
+      if (doc.summary) {
+        rows.push("Summary");
+        rows.push(`"${doc.summary.replace(/"/g, '""')}"`);
+      }
+
+      const csvContent = rows.join("\n");
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${firstName}_${surname}_${docTypeSanitized}.csv`;
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      toast.success("CSV report downloaded");
+    } catch (error) {
+      console.error("CSV download error:", error);
+      toast.error("Failed to download CSV");
     }
   };
 
@@ -114,6 +237,27 @@ const DocumentSection = ({ doc, onReplaceDocument }: { doc: DocumentData; onRepl
               {viewingDoc ? "Opening..." : "View"}
             </button>
           )}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className="text-xs font-medium text-purple hover:text-purple/80 flex items-center gap-0.5"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <Download className="h-3 w-3" />
+                Download
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-40">
+              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDownloadPdf(candidateName || "", doc); }}>
+                <FileText className="h-4 w-4 mr-2" />
+                PDF
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDownloadCsv(candidateName || "", doc); }}>
+                <FileText className="h-4 w-4 mr-2" />
+                CSV
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${expanded ? "rotate-180" : ""}`} />
         </div>
       </div>
@@ -288,6 +432,7 @@ const CandidateModal = ({ candidate, open, onClose, onReplaceDocument }: Candida
               <DocumentSection
                 key={index}
                 doc={doc}
+                candidateName={candidate.name}
                 onReplaceDocument={onReplaceDocument ? (selectedDoc) => onReplaceDocument(candidate, selectedDoc) : undefined}
               />
             ))}
