@@ -1,12 +1,16 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Eye, EyeOff, Loader2 } from "lucide-react";
+import { Eye, EyeOff, Loader2, FileCheck2, Award } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
 
+type LoginMode = "validation" | "assessment";
+
 const Login = () => {
+  const [mode, setMode] = useState<LoginMode>("validation");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -16,21 +20,19 @@ const Login = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!email.trim() || !password.trim()) {
       toast.error("Please enter both email and password");
       return;
     }
 
     setLoading(true);
-    
     const result = await login(email, password);
-    
     setLoading(false);
-    
+
     if (result.success) {
       toast.success("Welcome back!");
-      navigate("/");
+      navigate(mode === "assessment" ? "/assessment" : "/");
     } else {
       toast.error(result.error || "Login failed");
     }
