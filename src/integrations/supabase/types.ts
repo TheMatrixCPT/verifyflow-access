@@ -14,6 +14,39 @@ export type Database = {
   }
   public: {
     Tables: {
+      admin_users: {
+        Row: {
+          can_access_settings: boolean
+          created_at: string
+          email: string
+          id: string
+          name: string
+          password_hash: string
+          surname: string
+          updated_at: string
+        }
+        Insert: {
+          can_access_settings?: boolean
+          created_at?: string
+          email: string
+          id?: string
+          name: string
+          password_hash: string
+          surname: string
+          updated_at?: string
+        }
+        Update: {
+          can_access_settings?: boolean
+          created_at?: string
+          email?: string
+          id?: string
+          name?: string
+          password_hash?: string
+          surname?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       candidates: {
         Row: {
           created_at: string
@@ -192,7 +225,48 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      create_admin_user: {
+        Args: {
+          _can_access_settings?: boolean
+          _email: string
+          _name: string
+          _password: string
+          _surname: string
+        }
+        Returns: string
+      }
+      delete_admin_user: { Args: { _id: string }; Returns: undefined }
+      list_admin_users: {
+        Args: never
+        Returns: {
+          can_access_settings: boolean
+          created_at: string
+          email: string
+          id: string
+          name: string
+          surname: string
+        }[]
+      }
+      update_admin_user: {
+        Args: {
+          _can_access_settings: boolean
+          _id: string
+          _name: string
+          _password?: string
+          _surname: string
+        }
+        Returns: undefined
+      }
+      verify_admin_login: {
+        Args: { _email: string; _password: string }
+        Returns: {
+          can_access_settings: boolean
+          email: string
+          id: string
+          name: string
+          surname: string
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never
