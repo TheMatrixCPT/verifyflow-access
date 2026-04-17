@@ -52,8 +52,28 @@ const Login = () => {
 
         {/* Login Card */}
         <div className="vf-card p-8">
-          <h2 className="text-2xl font-semibold text-space-kadet mb-6">Sign In</h2>
-          
+          <Tabs value={mode} onValueChange={(v) => setMode(v as LoginMode)} className="mb-6">
+            <TabsList className="grid grid-cols-2 w-full h-11">
+              <TabsTrigger value="validation" className="gap-2 text-sm">
+                <FileCheck2 className="h-4 w-4" />
+                Document Validation
+              </TabsTrigger>
+              <TabsTrigger value="assessment" className="gap-2 text-sm">
+                <Award className="h-4 w-4" />
+                Assessment Tools
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+
+          <h2 className="text-xl font-semibold text-space-kadet mb-1">
+            {mode === "assessment" ? "Sign in to Assessment Tools" : "Sign in to Document Validation"}
+          </h2>
+          <p className="text-sm text-muted-foreground mb-5">
+            {mode === "assessment"
+              ? "Generate certificates and results reports from Microsoft Forms exports."
+              : "Validate HR documents and manage candidate sessions."}
+          </p>
+
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
               <label className="block text-sm font-medium text-foreground mb-2">
