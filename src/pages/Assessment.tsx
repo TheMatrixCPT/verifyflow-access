@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Upload, FileSpreadsheet, Download, Award, FileText, Loader2, ArrowLeft, LogOut, X } from "lucide-react";
+import { Upload, FileSpreadsheet, Download, Award, FileText, Loader2, LogOut, X, Link2, ListChecks } from "lucide-react";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,38 @@ const Assessment = () => {
   );
   const [threshold, setThreshold] = useState<number>(75);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [quizLink, setQuizLink] = useState<string>("");
+  /** Per-question option overrides — paste full multiple-choice list from the MS Forms quiz link. */
+  const [optionOverrides, setOptionOverrides] = useState<Record<string, string>>({});
+  const [showOptionsEditor, setShowOptionsEditor] = useState<boolean>(false);
+
+  /** Merge parser-derived options with admin overrides so the report shows ALL choices. */
+  const mergedQuestionOptions = useMemo(() => {
+    if (!data) return {} as Record<string, string[]>;
+    const out: Record<string, string[]> = {};
+    for (const q of data.questions) {
+      const override = optionOverrides[q];
+      if (override && override.trim()) {
+        const parsed = override
+          .split(/\r?\n/)
+          .map((s) => s.replace(/^\s*[-*•\d.)]+\s*/, "").trim())
+          .filter(Boolean);
+        // De-dupe while preserving order
+        const seen = new Set<string>();
+        const unique: string[] = [];
+        for (const p of parsed) {
+          if (!seen.has(p)) {
+            seen.add(p);
+            unique.push(p);
+          }
+        }
+        out[q] = unique.length > 0 ? unique : data.questionOptions[q] ?? [];
+      } else {
+        out[q] = data.questionOptions[q] ?? [];
+      }
+    }
+    return out;
+  }, [data, optionOverrides]);
 
   const handleFile = async (file: File | null) => {
     if (!file) return;
@@ -98,7 +130,7 @@ const Assessment = () => {
         assessmentTitle,
         assessmentDate: formattedDate,
         passThreshold: threshold,
-        questionOptions: data.questionOptions,
+        questionOptions: mergedQuestionOptions,
       });
       saveAs(blob, `${makeFileNameSafe(r.name)}_Report.pdf`);
     } catch (err) {
@@ -123,7 +155,7 @@ const Assessment = () => {
           assessmentTitle,
           assessmentDate: formattedDate,
           passThreshold: threshold,
-          questionOptions: data.questionOptions,
+          questionOptions: mergedQuestionOptions,
         });
         reportFolder?.file(`${makeFileNameSafe(r.name)}_Report.pdf`, reportBlob);
 
@@ -303,6 +335,92 @@ const Assessment = () => {
                   />
                 </div>
               </div>
+
+              {/* Microsoft Forms quiz link */}
+              <div className="mt-5">
+                <label className="vf-label flex items-center gap-1.5">
+                  <Link2 className="h-3.5 w-3.5" />
+                  Microsoft Forms Quiz Link (Collaboration Link)
+                </label>
+                <Input
+                  value={quizLink}
+                  onChange={(e) => setQuizLink(e.target.value)}
+                  placeholder="https://forms.office.com/Pages/ResponsePage.aspx?id=..."
+                />
+                <p className="text-xs text-muted-foreground mt-1.5">
+                  Paste the share link from your quiz. Open it in a new tab to copy each
+                  question's full multiple-choice options into the editor below — the report will
+                  then list every option and highlight the candidate's selection.
+                </p>
+                {quizLink.trim() && (
+                  <a
+                    href={quizLink.trim()}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-xs font-medium text-purple hover:underline mt-2"
+                  >
+                    <Link2 className="h-3 w-3" />
+                    Open quiz in new tab
+                  </a>
+                )}
+              </div>
+            </section>
+
+            {/* Per-question options editor */}
+            <section className="vf-card">
+              <div className="flex items-start justify-between mb-3">
+                <div>
+                  <h3 className="text-base font-semibold text-space-kadet flex items-center gap-2">
+                    <ListChecks className="h-4 w-4 text-purple" />
+                    Question Options ({data.questions.length})
+                  </h3>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    For each question, paste every multiple-choice option (one per line) from the
+                    quiz link. Leave blank to fall back to options actually selected by respondents.
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowOptionsEditor((s) => !s)}
+                >
+                  {showOptionsEditor ? "Hide" : "Show"} editor
+                </Button>
+              </div>
+              {showOptionsEditor && (
+                <div className="space-y-4 mt-2">
+                  {data.questions.map((q, idx) => {
+                    const fallback = data.questionOptions[q] ?? [];
+                    const value = optionOverrides[q] ?? "";
+                    const lineCount = value.trim()
+                      ? value.split(/\r?\n/).filter((l) => l.trim()).length
+                      : fallback.length;
+                    return (
+                      <div key={q} className="border border-border rounded-lg p-3 bg-muted/30">
+                        <p className="text-sm font-semibold text-space-kadet mb-1">
+                          Q{idx + 1}. {q}
+                        </p>
+                        <p className="text-xs text-muted-foreground mb-2">
+                          {lineCount} option{lineCount === 1 ? "" : "s"}
+                          {!value.trim() && fallback.length > 0 && " (auto-detected from responses)"}
+                        </p>
+                        <textarea
+                          className="w-full min-h-[88px] text-sm rounded-md border border-input bg-background p-2 font-mono"
+                          placeholder={
+                            fallback.length > 0
+                              ? fallback.join("\n")
+                              : "Option A\nOption B\nOption C\nOption D"
+                          }
+                          value={value}
+                          onChange={(e) =>
+                            setOptionOverrides((prev) => ({ ...prev, [q]: e.target.value }))
+                          }
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </section>
 
             {/* Stats + bulk action */}
