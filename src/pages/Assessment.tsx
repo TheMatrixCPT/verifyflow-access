@@ -90,6 +90,7 @@ const Assessment = () => {
   };
 
   const downloadReport = async (r: Respondent) => {
+    if (!data) return;
     setDownloadingId(`report-${r.id}`);
     try {
       const blob = await generateReport({
@@ -97,8 +98,9 @@ const Assessment = () => {
         assessmentTitle,
         assessmentDate: formattedDate,
         passThreshold: threshold,
+        questionOptions: data.questionOptions,
       });
-      saveAs(blob, `${makeFileNameSafe(r.name)}_Results.pdf`);
+      saveAs(blob, `${makeFileNameSafe(r.name)}_Report.pdf`);
     } catch (err) {
       console.error(err);
       toast.error("Failed to generate report.");
@@ -112,8 +114,8 @@ const Assessment = () => {
     setGenerating(true);
     try {
       const zip = new JSZip();
-      const certFolder = zip.folder("Certificates");
-      const reportFolder = zip.folder("Reports");
+      const certFolder = zip.folder("certificates");
+      const reportFolder = zip.folder("reports");
 
       for (const r of data.respondents) {
         const reportBlob = await generateReport({
@@ -121,8 +123,9 @@ const Assessment = () => {
           assessmentTitle,
           assessmentDate: formattedDate,
           passThreshold: threshold,
+          questionOptions: data.questionOptions,
         });
-        reportFolder?.file(`${makeFileNameSafe(r.name)}_Results.pdf`, reportBlob);
+        reportFolder?.file(`${makeFileNameSafe(r.name)}_Report.pdf`, reportBlob);
 
         if (r.percent !== null && r.percent >= threshold) {
           const certBlob = await generateCertificate({
@@ -135,7 +138,7 @@ const Assessment = () => {
       }
 
       const zipBlob = await zip.generateAsync({ type: "blob" });
-      saveAs(zipBlob, `${makeFileNameSafe(assessmentTitle || "Assessment")}_Results.zip`);
+      saveAs(zipBlob, `${makeFileNameSafe(assessmentTitle || "Assessment")}_Documents.zip`);
       toast.success(`Generated ${stats.passed} certificates and ${stats.total} reports.`);
     } catch (err) {
       console.error(err);
