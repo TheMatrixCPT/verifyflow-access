@@ -359,13 +359,9 @@ export async function generateReport(opts: ReportOptions): Promise<Blob> {
   doc.text("Your Answers", marginX, y);
   y += 8;
 
-  // Questions
+  // Questions — show ONLY the respondent's selected answer (no other options)
   respondent.answers.forEach((qa, i) => {
-    const allOptions = questionOptions[qa.question] ?? [];
     const selected = (qa.selected || "").trim();
-    const optionsToList = allOptions.length > 0 ? [...allOptions] : (selected ? [selected] : []);
-    const selectedInList = selected && optionsToList.some((o) => o === selected);
-    const showOther = selected && !selectedInList;
     const noAnswer = !selected;
 
     // measure question
@@ -373,7 +369,7 @@ export async function generateReport(opts: ReportOptions): Promise<Blob> {
     doc.setFontSize(11);
     const qLines = doc.splitTextToSize(`Q${i + 1}. ${qa.question || "(no question text)"}`, usableW);
 
-    // measure options
+    // measure options (only the selected one)
     const optionMeasures: { lines: string[]; isSelected: boolean }[] = [];
     let optionsBlockH = 0;
     doc.setFont("helvetica", "normal");
@@ -383,17 +379,9 @@ export async function generateReport(opts: ReportOptions): Promise<Blob> {
       optionMeasures.push({ lines, isSelected: false });
       optionsBlockH += lines.length * 5 + 4;
     } else {
-      for (const opt of optionsToList) {
-        const isSel = opt === selected;
-        const lines = doc.splitTextToSize(opt || "(blank)", usableW - 30); // leave room for "Your answer"
-        optionMeasures.push({ lines, isSelected: isSel });
-        optionsBlockH += lines.length * 5 + 3;
-      }
-      if (showOther) {
-        const lines = doc.splitTextToSize(selected, usableW - 30);
-        optionMeasures.push({ lines, isSelected: true });
-        optionsBlockH += lines.length * 5 + 3;
-      }
+      const lines = doc.splitTextToSize(selected, usableW - 30);
+      optionMeasures.push({ lines, isSelected: true });
+      optionsBlockH += lines.length * 5 + 3;
     }
 
     const blockH = qLines.length * 5.5 + optionsBlockH + 6;
