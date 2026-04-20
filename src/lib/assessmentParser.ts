@@ -91,7 +91,7 @@ export function parseFormsWorkbook(file: ArrayBuffer, formTitleFallback = "Asses
   const rows: Record<string, unknown>[] = XLSX.utils.sheet_to_json(sheet, { defval: "", raw: false });
 
   if (rows.length === 0) {
-    return { formTitle: firstSheet || formTitleFallback, questions: [], respondents: [] };
+    return { formTitle: firstSheet || formTitleFallback, questions: [], questionOptions: {}, respondents: [] };
   }
 
   const allHeaders = Object.keys(rows[0]);
@@ -186,9 +186,21 @@ export function parseFormsWorkbook(file: ArrayBuffer, formTitleFallback = "Asses
     };
   });
 
+  // Collect set of all selected values per question
+  const questionOptions: Record<string, string[]> = {};
+  for (const q of questionHeaders) {
+    const set = new Set<string>();
+    for (const r of respondents) {
+      const a = r.answers.find((x) => x.question === q);
+      if (a && a.selected) set.add(a.selected);
+    }
+    questionOptions[q] = Array.from(set).sort((a, b) => a.localeCompare(b));
+  }
+
   return {
     formTitle: firstSheet || formTitleFallback,
     questions: questionHeaders,
+    questionOptions,
     respondents,
   };
 }
