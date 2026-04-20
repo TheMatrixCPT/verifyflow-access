@@ -2,16 +2,17 @@ import jsPDF from "jspdf";
 import { format } from "date-fns";
 import type { Respondent } from "./assessmentParser";
 
-// CAPACITI palette
-const NAVY: [number, number, number] = [11, 31, 77];      // #0B1F4D
-const NAVY_DEEP: [number, number, number] = [7, 22, 56];
-const CORAL: [number, number, number] = [255, 107, 92];   // #FF6B5C
-const PURPLE: [number, number, number] = [124, 58, 237];  // #7C3AED
-const GOLD: [number, number, number] = [201, 168, 76];
-const IVORY: [number, number, number] = [251, 247, 240];
-const INK: [number, number, number] = [22, 28, 45];
-const MUTED: [number, number, number] = [110, 116, 134];
+// CAPACITI palette (from template)
+const NAVY: [number, number, number] = [27, 27, 92];        // deep indigo navy
+const CORAL: [number, number, number] = [240, 78, 90];      // red/coral
+const PURPLE: [number, number, number] = [99, 84, 230];     // electric purple
+const INK: [number, number, number] = [30, 30, 50];
+const MUTED: [number, number, number] = [120, 124, 145];
+const LIGHT_GRAY: [number, number, number] = [243, 243, 247];
+const LIGHT_PURPLE_BG: [number, number, number] = [238, 235, 252];
 const SUCCESS: [number, number, number] = [34, 139, 88];
+const SUCCESS_BG: [number, number, number] = [223, 244, 232];
+const FAIL_BG: [number, number, number] = [253, 226, 226];
 
 interface CertificateOptions {
   respondent: Respondent;
@@ -19,151 +20,178 @@ interface CertificateOptions {
   assessmentDate: string;
 }
 
-/** Draw a soft circular blob (fake blur via stacked transparent circles). */
-function drawBlob(
-  doc: jsPDF,
-  cx: number,
-  cy: number,
-  radius: number,
-  color: [number, number, number],
-) {
-  const layers = 6;
-  for (let i = layers; i >= 1; i--) {
-    const r = (radius * i) / layers;
-    const opacity = 0.08 + (1 - i / layers) * 0.12;
-    // jsPDF uses GState for opacity
-    const GState = (doc as unknown as {
-      GState: new (opts: { opacity: number }) => unknown;
-      setGState: (gs: unknown) => void;
-    });
-    try {
-      const gs = new GState.GState({ opacity });
-      GState.setGState.call(doc, gs);
-    } catch {
-      // ignore if GState unsupported
-    }
-    doc.setFillColor(...color);
-    doc.circle(cx, cy, r, "F");
-  }
-  // reset opacity
+/** Set fill opacity (silently no-op if unsupported). */
+function setOpacity(doc: jsPDF, opacity: number) {
   try {
-    const GState = (doc as unknown as {
+    const G = doc as unknown as {
       GState: new (opts: { opacity: number }) => unknown;
       setGState: (gs: unknown) => void;
-    });
-    const gs = new GState.GState({ opacity: 1 });
-    GState.setGState.call(doc, gs);
+    };
+    const gs = new G.GState({ opacity });
+    G.setGState.call(doc, gs);
   } catch {
     /* noop */
   }
 }
 
-/** Generate an A4 LANDSCAPE certificate PDF (CAPACITI brand, pure code). */
+/** Draw the small CAPACITI mark: red filled dot with navy dot inside + "CAPACITI" wordmark. */
+function drawCapacitiMark(doc: jsPDF, x: number, y: number, scale = 1) {
+  const r = 2.2 * scale;
+  // outer red ring
+  doc.setFillColor(...CORAL);
+  doc.circle(x, y, r, "F");
+  // inner navy dot
+  doc.setFillColor(...NAVY);
+  doc.circle(x, y, r * 0.45, "F");
+  // wordmark
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11 * scale);
+  doc.setTextColor(...NAVY);
+  doc.text("CAPACITI", x + r + 2, y + 1.2 * scale);
+}
+
+/**
+ * Draw a corner "blob" cluster — overlapping red and purple ovals like the template.
+ * `corner` chooses which corner to render in.
+ */
+function drawCornerBlobs(
+  doc: jsPDF,
+  pageW: number,
+  pageH: number,
+  corner: "tr" | "bl",
+) {
+  if (corner === "tr") {
+    // Top-right: large purple behind, red in front
+    doc.setFillColor(...PURPLE);
+    doc.ellipse(pageW - 8, -8, 60, 38, "F");
+    doc.setFillColor(...CORAL);
+    doc.ellipse(pageW - 35, -2, 55, 32, "F");
+  } else {
+    // Bottom-left: large red behind, purple in front
+    doc.setFillColor(...CORAL);
+    doc.ellipse(0, pageH + 4, 55, 32, "F");
+    doc.setFillColor(...PURPLE);
+    doc.ellipse(28, pageH + 4, 50, 30, "F");
+  }
+}
+
+/** Generate an A4 PORTRAIT certificate PDF that mirrors the CAPACITI template. */
 export async function generateCertificate(opts: CertificateOptions): Promise<Blob> {
   const { respondent, assessmentTitle, assessmentDate } = opts;
-  const doc = new jsPDF({ unit: "mm", format: "a4", orientation: "landscape" });
-  const pageW = doc.internal.pageSize.getWidth();   // 297
-  const pageH = doc.internal.pageSize.getHeight();  // 210
+  const doc = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+  const pageW = doc.internal.pageSize.getWidth();   // 210
+  const pageH = doc.internal.pageSize.getHeight();  // 297
 
-  // Navy background
-  doc.setFillColor(...NAVY_DEEP);
+  // White background (already default but explicit for safety)
+  doc.setFillColor(255, 255, 255);
   doc.rect(0, 0, pageW, pageH, "F");
 
-  // Coral & purple blurred blobs
-  drawBlob(doc, pageW - 20, 10, 70, CORAL);
-  drawBlob(doc, 10, pageH - 10, 80, PURPLE);
-  drawBlob(doc, pageW + 10, pageH - 30, 50, PURPLE);
+  // Decorative blob clusters
+  drawCornerBlobs(doc, pageW, pageH, "tr");
+  drawCornerBlobs(doc, pageW, pageH, "bl");
 
-  // Inner ivory card
-  const cardX = 18;
-  const cardY = 18;
-  const cardW = pageW - 36;
-  const cardH = pageH - 36;
-  doc.setFillColor(...IVORY);
-  doc.roundedRect(cardX, cardY, cardW, cardH, 6, 6, "F");
-
-  // Gold inner border
-  doc.setDrawColor(...GOLD);
-  doc.setLineWidth(0.6);
-  doc.roundedRect(cardX + 4, cardY + 4, cardW - 8, cardH - 8, 4, 4, "S");
-
-  // Top-left CAPACITI wordmark
+  // Title — "CERTIFICATE OF COMPLETION" (serif, navy, two lines, centered)
   doc.setFont("times", "bold");
   doc.setTextColor(...NAVY);
-  doc.setFontSize(18);
-  doc.text("CAPACITI", cardX + 14, cardY + 18);
-
-  // Top-right small accent
-  doc.setFillColor(...CORAL);
-  doc.circle(cardX + cardW - 14, cardY + 15, 2, "F");
-  doc.setFillColor(...PURPLE);
-  doc.circle(cardX + cardW - 8, cardY + 15, 2, "F");
+  doc.setFontSize(48);
+  doc.text("CERTIFICATE", pageW / 2, 78, { align: "center" });
+  doc.text("OF COMPLETION", pageW / 2, 100, { align: "center" });
 
   // Eyebrow
-  doc.setFont("times", "italic");
-  doc.setTextColor(...MUTED);
+  doc.setFont("times", "normal");
+  doc.setTextColor(...NAVY);
   doc.setFontSize(13);
-  doc.text("Certificate of Completion", pageW / 2, cardY + 42, { align: "center" });
+  doc.text("This certificate is presented to", pageW / 2, 122, { align: "center" });
 
-  // Recipient name (huge display)
+  // Recipient name (UPPERCASE serif bold)
   doc.setFont("times", "bold");
   doc.setTextColor(...NAVY);
-  doc.setFontSize(40);
-  doc.text(respondent.name, pageW / 2, cardY + 70, { align: "center" });
+  doc.setFontSize(28);
+  doc.text(respondent.name.toUpperCase(), pageW / 2, 142, { align: "center" });
 
-  // Underline accent
-  doc.setDrawColor(...CORAL);
-  doc.setLineWidth(0.8);
-  doc.line(pageW / 2 - 35, cardY + 76, pageW / 2 + 35, cardY + 76);
+  // Diamond divider line
+  const divY = 152;
+  const divHalf = 60;
+  doc.setDrawColor(...NAVY);
+  doc.setLineWidth(0.6);
+  doc.line(pageW / 2 - divHalf + 4, divY, pageW / 2 + divHalf - 4, divY);
+  // diamonds at each end
+  const drawDiamond = (cx: number, cy: number, s: number) => {
+    doc.setFillColor(...NAVY);
+    doc.triangle(cx - s, cy, cx, cy - s, cx + s, cy, "F");
+    doc.triangle(cx - s, cy, cx, cy + s, cx + s, cy, "F");
+  };
+  drawDiamond(pageW / 2 - divHalf, divY, 1.8);
+  drawDiamond(pageW / 2 + divHalf, divY, 1.8);
 
-  // "has successfully completed"
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(...INK);
+  // "has successfully completed the assessment for"
+  doc.setFont("times", "normal");
+  doc.setTextColor(...NAVY);
   doc.setFontSize(13);
-  doc.text("has successfully completed", pageW / 2, cardY + 90, { align: "center" });
+  doc.text("has successfully completed the assessment for", pageW / 2, 172, { align: "center" });
 
-  // Assessment title
-  doc.setFont("times", "bolditalic");
+  // Assessment title (serif bold)
+  doc.setFont("times", "bold");
   doc.setTextColor(...NAVY);
   doc.setFontSize(20);
-  const titleLines = doc.splitTextToSize(assessmentTitle, cardW - 40);
-  doc.text(titleLines, pageW / 2, cardY + 102, { align: "center" });
+  const titleLines = doc.splitTextToSize(assessmentTitle, pageW - 60);
+  doc.text(titleLines, pageW / 2, 188, { align: "center" });
 
-  // Score line
+  // "Achieving a score of"
+  doc.setFont("times", "normal");
+  doc.setTextColor(...NAVY);
+  doc.setFontSize(13);
+  doc.text("Achieving a score of", pageW / 2, 215, { align: "center" });
+
+  // Score (coral, large)
   const scoreText =
     respondent.percent !== null
-      ? `${respondent.rawScore !== null && respondent.totalPossible !== null ? `${respondent.rawScore}/${respondent.totalPossible} · ` : ""}${respondent.percent.toFixed(1)}%`
+      ? respondent.rawScore !== null && respondent.totalPossible !== null
+        ? `${respondent.rawScore} / ${respondent.totalPossible}  (${respondent.percent.toFixed(2)}%)`
+        : `${respondent.percent.toFixed(2)}%`
       : respondent.rawScore !== null
         ? `${respondent.rawScore}`
         : "—";
+  doc.setFont("times", "bold");
+  doc.setTextColor(...CORAL);
+  doc.setFontSize(26);
+  doc.text(scoreText, pageW / 2, 230, { align: "center" });
 
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(...NAVY);
-  doc.setFontSize(22);
-  doc.text(scoreText, pageW / 2, cardY + 128, { align: "center" });
+  // Underline beneath score
+  doc.setDrawColor(...NAVY);
+  doc.setLineWidth(0.5);
+  doc.line(pageW / 2 - 50, 235, pageW / 2 + 50, 235);
 
   // Date
-  doc.setFont("helvetica", "normal");
+  doc.setFont("times", "normal");
+  doc.setTextColor(...MUTED);
   doc.setFontSize(11);
-  doc.setTextColor(...MUTED);
-  doc.text(`Issued ${assessmentDate}`, pageW / 2, cardY + 138, { align: "center" });
+  doc.text(`Date: ${assessmentDate}`, pageW / 2, 244, { align: "center" });
 
-  // Signature line bottom-right
-  const sigX = cardX + cardW - 80;
-  const sigY = cardY + cardH - 22;
-  doc.setDrawColor(...NAVY);
-  doc.setLineWidth(0.4);
-  doc.line(sigX, sigY, sigX + 65, sigY);
+  // CAPACITI mark centered near bottom
+  const markY = 268;
+  const markText = "CAPACITI";
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(13);
+  const markTextW = doc.getTextWidth(markText);
+  const dotR = 2.6;
+  const totalW = dotR * 2 + 2.5 + markTextW;
+  const startX = (pageW - totalW) / 2;
+  // red ring
+  doc.setFillColor(...CORAL);
+  doc.circle(startX + dotR, markY - 1.2, dotR, "F");
+  // navy inner
+  doc.setFillColor(...NAVY);
+  doc.circle(startX + dotR, markY - 1.2, dotR * 0.45, "F");
+  // text
+  doc.setTextColor(...NAVY);
+  doc.text(markText, startX + dotR * 2 + 2.5, markY);
+
+  // "Issued by CAPACITI"
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.setTextColor(...MUTED);
-  doc.text("CAPACITI Programme Lead", sigX + 32.5, sigY + 5, { align: "center" });
-
-  // Bottom-left small CAPACITI mark
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(9);
-  doc.setTextColor(...NAVY);
-  doc.text("CAPACITI · Empowering Digital Talent", cardX + 14, cardY + cardH - 10);
+  doc.text("Issued by CAPACITI", pageW / 2, markY + 6, { align: "center" });
 
   return doc.output("blob");
 }
@@ -177,234 +205,254 @@ interface ReportOptions {
   questionOptions: Record<string, string[]>;
 }
 
-function drawReportHeader(doc: jsPDF, title: string, name: string, email: string) {
+function drawReportHeader(doc: jsPDF, assessmentTitle: string) {
   const pageW = doc.internal.pageSize.getWidth();
-  doc.setFillColor(...NAVY);
-  doc.rect(0, 0, pageW, 32, "F");
+
+  // Top tri-color stripe (coral | purple | navy)
+  const stripeY = 0;
+  const stripeH = 4;
+  const seg1 = pageW * 0.28;
+  const seg2 = pageW * 0.42;
   doc.setFillColor(...CORAL);
-  doc.rect(0, 32, pageW, 1.5, "F");
+  doc.rect(0, stripeY, seg1, stripeH, "F");
   doc.setFillColor(...PURPLE);
-  doc.rect(0, 33.5, pageW, 1, "F");
+  doc.rect(seg1, stripeY, seg2, stripeH, "F");
+  doc.setFillColor(...NAVY);
+  doc.rect(seg1 + seg2, stripeY, pageW - seg1 - seg2, stripeH, "F");
 
-  doc.setTextColor(255, 255, 255);
+  // CAPACITI mark
+  drawCapacitiMark(doc, 18, 18, 1);
+
+  // "Assessment Results Report"
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(13);
-  doc.text(title, 14, 14);
+  doc.setTextColor(...NAVY);
+  doc.setFontSize(22);
+  doc.text("Assessment Results Report", 14, 32);
 
+  // Subtitle
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
-  doc.text(`${name}${email ? ` · ${email}` : ""}`, 14, 22);
-
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(13);
-  doc.text("CAPACITI", pageW - 14, 19, { align: "right" });
+  doc.setFontSize(12);
+  doc.setTextColor(...MUTED);
+  const titleLines = doc.splitTextToSize(assessmentTitle, pageW - 28);
+  doc.text(titleLines, 14, 40);
 }
 
-function drawReportFooter(doc: jsPDF) {
+function drawReportFooter(doc: jsPDF, name: string, title: string) {
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const current = doc.getCurrentPageInfo().pageNumber;
   const total = doc.getNumberOfPages();
 
-  doc.setDrawColor(220, 220, 230);
-  doc.setLineWidth(0.3);
-  doc.line(14, pageH - 14, pageW - 14, pageH - 14);
-
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.setTextColor(...MUTED);
-  doc.text("Generated by CAPACITI Certificate Generator", 14, pageH - 8);
-  doc.text(`Page ${current} of ${total}`, pageW - 14, pageH - 8, { align: "right" });
+  doc.text(
+    `${name}  •  ${title}  •  Page ${current} of ${total}`,
+    pageW / 2,
+    pageH - 10,
+    { align: "center" },
+  );
 }
 
-/** Generate the assessment results report (portrait A4) — every option listed, selected highlighted. */
+/** Generate the assessment results report (portrait A4) — matches CAPACITI template. */
 export async function generateReport(opts: ReportOptions): Promise<Blob> {
   const { respondent, assessmentTitle, assessmentDate, passThreshold, questionOptions } = opts;
   const doc = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
-
-  drawReportHeader(doc, assessmentTitle, respondent.name, respondent.email);
-
-  // Summary card
-  let y = 46;
-  const passed = respondent.percent !== null && respondent.percent >= passThreshold;
-  const cardH = 26;
-  doc.setFillColor(248, 248, 252);
-  doc.setDrawColor(225, 225, 235);
-  doc.roundedRect(14, y, pageW - 28, cardH, 2, 2, "FD");
-
-  // Score
-  doc.setTextColor(...NAVY);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(10);
-  doc.text("SCORE", 20, y + 8);
-  doc.setFontSize(18);
-  const scoreLine =
-    respondent.percent !== null
-      ? `${respondent.percent.toFixed(1)}%`
-      : respondent.rawScore !== null
-        ? `${respondent.rawScore}`
-        : "—";
-  doc.text(scoreLine, 20, y + 18);
-
-  // Raw
-  if (respondent.rawScore !== null && respondent.totalPossible !== null) {
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    doc.setTextColor(...MUTED);
-    doc.text(`${respondent.rawScore} / ${respondent.totalPossible} pts`, 20, y + 23);
-  }
-
-  // Threshold
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(10);
-  doc.setTextColor(...NAVY);
-  doc.text("THRESHOLD", 80, y + 8);
-  doc.setFontSize(14);
-  doc.text(`${passThreshold}%`, 80, y + 18);
-
-  // Date
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(10);
-  doc.text("DATE", 130, y + 8);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(11);
-  doc.text(assessmentDate, 130, y + 18);
-
-  // Pass badge
-  const badgeColor = passed ? SUCCESS : CORAL;
-  const badgeX = pageW - 60;
-  const badgeY = y + 6;
-  doc.setFillColor(...badgeColor);
-  doc.roundedRect(badgeX, badgeY, 46, 14, 2, 2, "F");
-  doc.setTextColor(255, 255, 255);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
-  doc.text(passed ? "PASS" : "FAIL", badgeX + 23, badgeY + 9, { align: "center" });
-
-  y += cardH + 10;
-
-  // Section title
-  doc.setTextColor(...NAVY);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(13);
-  doc.text("Responses", 14, y);
-  doc.setDrawColor(...PURPLE);
-  doc.setLineWidth(0.6);
-  doc.line(14, y + 2, 40, y + 2);
-  y += 8;
-
   const marginX = 14;
   const usableW = pageW - marginX * 2;
 
+  drawReportHeader(doc, assessmentTitle);
+
+  // Summary card (light gray rounded box)
+  let y = 50;
+  const cardH = 42;
+  doc.setFillColor(...LIGHT_GRAY);
+  doc.roundedRect(marginX, y, usableW, cardH, 2.5, 2.5, "F");
+
+  // Two columns of labels/values + PASS/FAIL on the right
+  const passed = respondent.percent !== null && respondent.percent >= passThreshold;
+  const labelColor = MUTED;
+  const valueColor = NAVY;
+
+  // NAME
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.setTextColor(...labelColor);
+  doc.text("NAME", marginX + 6, y + 8);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(13);
+  doc.setTextColor(...valueColor);
+  doc.text(respondent.name, marginX + 6, y + 15);
+
+  // SCORE
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.setTextColor(...labelColor);
+  doc.text("SCORE", marginX + 70, y + 8);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(13);
+  doc.setTextColor(...valueColor);
+  const scoreLine =
+    respondent.percent !== null
+      ? respondent.rawScore !== null && respondent.totalPossible !== null
+        ? `${respondent.rawScore} / ${respondent.totalPossible}  (${respondent.percent.toFixed(2)}%)`
+        : `${respondent.percent.toFixed(2)}%`
+      : respondent.rawScore !== null
+        ? `${respondent.rawScore}`
+        : "—";
+  doc.text(scoreLine, marginX + 70, y + 15);
+
+  // EMAIL
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.setTextColor(...labelColor);
+  doc.text("EMAIL", marginX + 6, y + 25);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.setTextColor(...valueColor);
+  doc.text(respondent.email || "—", marginX + 6, y + 32);
+
+  // DATE
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.setTextColor(...labelColor);
+  doc.text("DATE", marginX + 70, y + 25);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.setTextColor(...valueColor);
+  doc.text(assessmentDate, marginX + 70, y + 32);
+
+  // PASS / FAIL badge (top-right of card)
+  const badgeW = 38;
+  const badgeH = 16;
+  const badgeX = marginX + usableW - badgeW - 6;
+  const badgeY = y + 6;
+  if (passed) {
+    doc.setFillColor(...SUCCESS_BG);
+    doc.setDrawColor(...SUCCESS);
+  } else {
+    doc.setFillColor(...FAIL_BG);
+    doc.setDrawColor(...CORAL);
+  }
+  doc.setLineWidth(0.6);
+  doc.roundedRect(badgeX, badgeY, badgeW, badgeH, 1.5, 1.5, "FD");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(13);
+  doc.setTextColor(...(passed ? SUCCESS : CORAL));
+  doc.text(passed ? "PASS" : "FAIL", badgeX + badgeW / 2, badgeY + 11, { align: "center" });
+
+  y += cardH + 6;
+
+  // Pass threshold line
+  doc.setFont("helvetica", "italic");
+  doc.setFontSize(10);
+  doc.setTextColor(...MUTED);
+  doc.text(`Pass threshold: ${passThreshold}%`, marginX, y);
+  y += 8;
+
+  // "Your Answers" section heading
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(16);
+  doc.setTextColor(...NAVY);
+  doc.text("Your Answers", marginX, y);
+  y += 8;
+
+  // Questions
   respondent.answers.forEach((qa, i) => {
     const allOptions = questionOptions[qa.question] ?? [];
     const selected = (qa.selected || "").trim();
     const optionsToList = allOptions.length > 0 ? [...allOptions] : (selected ? [selected] : []);
     const selectedInList = selected && optionsToList.some((o) => o === selected);
     const showOther = selected && !selectedInList;
+    const noAnswer = !selected;
 
-    // measure
+    // measure question
     doc.setFont("helvetica", "bold");
     doc.setFontSize(11);
     const qLines = doc.splitTextToSize(`Q${i + 1}. ${qa.question || "(no question text)"}`, usableW);
 
-    let optionsBlockH = 0;
+    // measure options
     const optionMeasures: { lines: string[]; isSelected: boolean }[] = [];
+    let optionsBlockH = 0;
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10.5);
-    for (const opt of optionsToList) {
-      const isSel = opt === selected;
-      const lines = doc.splitTextToSize(opt || "(blank)", usableW - 14);
-      optionMeasures.push({ lines, isSelected: isSel });
+    if (noAnswer) {
+      const lines = doc.splitTextToSize("(No answer provided)", usableW - 16);
+      optionMeasures.push({ lines, isSelected: false });
       optionsBlockH += lines.length * 5 + 4;
-    }
-    let otherLines: string[] = [];
-    if (showOther) {
-      otherLines = doc.splitTextToSize(`Other answer: ${selected}`, usableW - 14);
-      optionsBlockH += otherLines.length * 5 + 4;
-    }
-    if (optionsToList.length === 0 && !showOther) {
-      optionsBlockH = 8;
+    } else {
+      for (const opt of optionsToList) {
+        const isSel = opt === selected;
+        const lines = doc.splitTextToSize(opt || "(blank)", usableW - 30); // leave room for "Your answer"
+        optionMeasures.push({ lines, isSelected: isSel });
+        optionsBlockH += lines.length * 5 + 3;
+      }
+      if (showOther) {
+        const lines = doc.splitTextToSize(selected, usableW - 30);
+        optionMeasures.push({ lines, isSelected: true });
+        optionsBlockH += lines.length * 5 + 3;
+      }
     }
 
-    const blockH = qLines.length * 5.5 + optionsBlockH + 8;
+    const blockH = qLines.length * 5.5 + optionsBlockH + 6;
 
-    if (y + blockH > pageH - 22) {
-      drawReportFooter(doc);
+    // page break if needed
+    if (y + blockH > pageH - 18) {
+      drawReportFooter(doc, respondent.name, assessmentTitle);
       doc.addPage();
-      drawReportHeader(doc, assessmentTitle, respondent.name, respondent.email);
-      y = 46;
+      drawReportHeader(doc, assessmentTitle);
+      y = 50;
     }
 
-    // Question text
-    doc.setTextColor(...NAVY);
+    // Question text (bold dark)
+    doc.setTextColor(...INK);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(11);
     doc.text(qLines, marginX, y);
-    y += qLines.length * 5.5 + 3;
-
-    if (optionsToList.length === 0 && !showOther) {
-      doc.setFont("helvetica", "italic");
-      doc.setFontSize(10);
-      doc.setTextColor(...MUTED);
-      doc.text("(no answer provided)", marginX + 4, y + 2);
-      y += 8;
-      return;
-    }
+    y += qLines.length * 5.5 + 2;
 
     // Options
     for (const m of optionMeasures) {
-      const pillH = m.lines.length * 5 + 4;
+      const pillH = m.lines.length * 5 + 3;
+
       if (m.isSelected) {
-        // coral highlight pill
-        doc.setFillColor(255, 232, 228); // light coral bg
-        doc.setDrawColor(...CORAL);
+        // Light purple bg + purple outline pill
+        doc.setFillColor(...LIGHT_PURPLE_BG);
+        doc.setDrawColor(...PURPLE);
         doc.setLineWidth(0.4);
-        doc.roundedRect(marginX + 2, y - 1, usableW - 2, pillH, 1.5, 1.5, "FD");
-        // checkmark
-        doc.setTextColor(...CORAL);
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(11);
-        doc.text("\u2714", marginX + 6, y + 4);
-        doc.setTextColor(...INK);
+        doc.roundedRect(marginX, y - 1, usableW, pillH, 1.2, 1.2, "FD");
+        // filled purple bullet
+        doc.setFillColor(...PURPLE);
+        doc.circle(marginX + 6, y + 2.5, 1.4, "F");
+        // option text (bold navy)
         doc.setFont("helvetica", "bold");
         doc.setFontSize(10.5);
-        doc.text(m.lines, marginX + 12, y + 4);
+        doc.setTextColor(...NAVY);
+        doc.text(m.lines, marginX + 12, y + 3.5);
+        // "Your answer" right-aligned
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(9);
+        doc.setTextColor(...PURPLE);
+        doc.text("Your answer", marginX + usableW - 3, y + 3.5, { align: "right" });
       } else {
-        // bullet
-        doc.setFillColor(180, 184, 200);
-        doc.circle(marginX + 7, y + 2.5, 0.9, "F");
-        doc.setTextColor(...INK);
+        // empty circle bullet, gray text
+        doc.setDrawColor(180, 184, 200);
+        doc.setLineWidth(0.4);
+        doc.circle(marginX + 6, y + 2.5, 1.4, "S");
         doc.setFont("helvetica", "normal");
         doc.setFontSize(10.5);
-        doc.text(m.lines, marginX + 12, y + 4);
+        doc.setTextColor(...INK);
+        doc.text(m.lines, marginX + 12, y + 3.5);
       }
-      y += pillH + 1;
-    }
-
-    if (showOther) {
-      doc.setFillColor(255, 232, 228);
-      doc.setDrawColor(...CORAL);
-      doc.setLineWidth(0.4);
-      const pillH = otherLines.length * 5 + 4;
-      doc.roundedRect(marginX + 2, y - 1, usableW - 2, pillH, 1.5, 1.5, "FD");
-      doc.setTextColor(...CORAL);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(11);
-      doc.text("\u2714", marginX + 6, y + 4);
-      doc.setTextColor(...INK);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(10.5);
-      doc.text(otherLines, marginX + 12, y + 4);
       y += pillH + 1;
     }
 
     y += 5;
   });
 
-  drawReportFooter(doc);
+  drawReportFooter(doc, respondent.name, assessmentTitle);
   return doc.output("blob");
 }
 
@@ -413,8 +461,8 @@ export function makeFileNameSafe(name: string): string {
 }
 
 export function formatAssessmentDate(d: Date | string | null | undefined): string {
-  if (!d) return format(new Date(), "MMMM d, yyyy");
+  if (!d) return format(new Date(), "d MMMM yyyy");
   const parsed = typeof d === "string" ? new Date(d) : d;
-  if (Number.isNaN(parsed.getTime())) return format(new Date(), "MMMM d, yyyy");
-  return format(parsed, "MMMM d, yyyy");
+  if (Number.isNaN(parsed.getTime())) return format(new Date(), "d MMMM yyyy");
+  return format(parsed, "d MMMM yyyy");
 }
