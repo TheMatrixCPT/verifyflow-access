@@ -179,10 +179,10 @@ const Assessment = () => {
         </div>
       </header>
 
-      <main className="vf-section space-y-6">
+      <main className="vf-section space-y-6 bg-secondary-foreground">
         {/* Hero */}
         <section
-          className="relative overflow-hidden rounded-3xl p-10 text-white"
+          className="relative overflow-hidden rounded-3xl p-10 text-white bg-secondary-foreground"
           style={{
             background: "var(--gradient-hero)",
             boxShadow: "var(--shadow-elegant)",
