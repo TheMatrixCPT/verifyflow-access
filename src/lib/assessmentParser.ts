@@ -69,13 +69,19 @@ const META_HEADERS = new Set(
     "quiz feedback",
     "points",
     "feedback",
+    "grade posted time",
+    "grade",
+    "graded",
   ].map((s) => s.toLowerCase()),
 );
 
 function isMetaHeader(h: string): boolean {
   const key = h.trim().toLowerCase();
   if (META_HEADERS.has(key)) return true;
-  // "Points - Q1: ..." style columns are per-question score columns we treat separately
+  // Ignore any feedback columns (e.g. "Feedback - Q1", "Quiz Feedback", "Q1 Feedback")
+  if (/feedback/i.test(key)) return true;
+  // Ignore any grade-posted-time variants
+  if (/grade\s*posted\s*time/i.test(key)) return true;
   return false;
 }
 
