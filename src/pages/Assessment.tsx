@@ -130,7 +130,7 @@ const Assessment = () => {
         assessmentTitle,
         assessmentDate: formattedDate,
         passThreshold: threshold,
-        questionOptions: data.questionOptions,
+        questionOptions: mergedQuestionOptions,
       });
       saveAs(blob, `${makeFileNameSafe(r.name)}_Report.pdf`);
     } catch (err) {
@@ -155,7 +155,7 @@ const Assessment = () => {
           assessmentTitle,
           assessmentDate: formattedDate,
           passThreshold: threshold,
-          questionOptions: data.questionOptions,
+          questionOptions: mergedQuestionOptions,
         });
         reportFolder?.file(`${makeFileNameSafe(r.name)}_Report.pdf`, reportBlob);
 
