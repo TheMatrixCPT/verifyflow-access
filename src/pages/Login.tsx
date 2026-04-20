@@ -66,7 +66,7 @@ const Login = () => {
         />
 
         {/* Top: Logo */}
-        <div className="relative z-10 flex items-center gap-3 animate-fade-in-up">
+        <div className="relative z-10 gap-3 animate-fade-in-up flex items-center justify-center">
           <img src={capacitiMark} alt="CAPACITI" className="h-11 w-11 drop-shadow-lg" />
           <div className="leading-tight">
             <div className="text-[11px] uppercase tracking-[0.25em] text-pink/70">CAPACITI</div>
@@ -75,7 +75,7 @@ const Login = () => {
         </div>
 
         {/* Center: Floating mark + headline */}
-        <div className="relative z-10 flex flex-col gap-10 my-8">
+        <div className="relative z-10 flex-col gap-10 my-8 flex items-center justify-start">
           <div className="relative h-56 w-56 xl:h-64 xl:w-64">
             <div
               aria-hidden
@@ -99,8 +99,8 @@ const Login = () => {
             />
           </div>
 
-          <div className="space-y-5 max-w-md animate-fade-in-up" style={{ animationDelay: "120ms", opacity: 0 }}>
-            <div className="inline-flex items-center gap-2 rounded-full border border-pink/20 bg-white/5 backdrop-blur px-3 py-1 text-xs font-medium text-pink/90">
+          <div className="space-y-5 max-w-md animate-fade-in-up text-center" style={{ animationDelay: "120ms", opacity: 0 }}>
+            <div className="inline-flex items-center gap-2 rounded-full border border-pink/20 bg-white/5 backdrop-blur px-3 py-1 text-xs font-medium text-pink/90 text-center">
               <Sparkles className="h-3.5 w-3.5 text-salmon" />
               Trusted internal portal
             </div>
