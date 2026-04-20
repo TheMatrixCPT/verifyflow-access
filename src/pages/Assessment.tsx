@@ -335,6 +335,92 @@ const Assessment = () => {
                   />
                 </div>
               </div>
+
+              {/* Microsoft Forms quiz link */}
+              <div className="mt-5">
+                <label className="vf-label flex items-center gap-1.5">
+                  <Link2 className="h-3.5 w-3.5" />
+                  Microsoft Forms Quiz Link (Collaboration Link)
+                </label>
+                <Input
+                  value={quizLink}
+                  onChange={(e) => setQuizLink(e.target.value)}
+                  placeholder="https://forms.office.com/Pages/ResponsePage.aspx?id=..."
+                />
+                <p className="text-xs text-muted-foreground mt-1.5">
+                  Paste the share link from your quiz. Open it in a new tab to copy each
+                  question's full multiple-choice options into the editor below — the report will
+                  then list every option and highlight the candidate's selection.
+                </p>
+                {quizLink.trim() && (
+                  <a
+                    href={quizLink.trim()}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-xs font-medium text-purple hover:underline mt-2"
+                  >
+                    <Link2 className="h-3 w-3" />
+                    Open quiz in new tab
+                  </a>
+                )}
+              </div>
+            </section>
+
+            {/* Per-question options editor */}
+            <section className="vf-card">
+              <div className="flex items-start justify-between mb-3">
+                <div>
+                  <h3 className="text-base font-semibold text-space-kadet flex items-center gap-2">
+                    <ListChecks className="h-4 w-4 text-purple" />
+                    Question Options ({data.questions.length})
+                  </h3>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    For each question, paste every multiple-choice option (one per line) from the
+                    quiz link. Leave blank to fall back to options actually selected by respondents.
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowOptionsEditor((s) => !s)}
+                >
+                  {showOptionsEditor ? "Hide" : "Show"} editor
+                </Button>
+              </div>
+              {showOptionsEditor && (
+                <div className="space-y-4 mt-2">
+                  {data.questions.map((q, idx) => {
+                    const fallback = data.questionOptions[q] ?? [];
+                    const value = optionOverrides[q] ?? "";
+                    const lineCount = value.trim()
+                      ? value.split(/\r?\n/).filter((l) => l.trim()).length
+                      : fallback.length;
+                    return (
+                      <div key={q} className="border border-border rounded-lg p-3 bg-muted/30">
+                        <p className="text-sm font-semibold text-space-kadet mb-1">
+                          Q{idx + 1}. {q}
+                        </p>
+                        <p className="text-xs text-muted-foreground mb-2">
+                          {lineCount} option{lineCount === 1 ? "" : "s"}
+                          {!value.trim() && fallback.length > 0 && " (auto-detected from responses)"}
+                        </p>
+                        <textarea
+                          className="w-full min-h-[88px] text-sm rounded-md border border-input bg-background p-2 font-mono"
+                          placeholder={
+                            fallback.length > 0
+                              ? fallback.join("\n")
+                              : "Option A\nOption B\nOption C\nOption D"
+                          }
+                          value={value}
+                          onChange={(e) =>
+                            setOptionOverrides((prev) => ({ ...prev, [q]: e.target.value }))
+                          }
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </section>
 
             {/* Stats + bulk action */}
