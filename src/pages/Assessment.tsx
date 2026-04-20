@@ -90,6 +90,7 @@ const Assessment = () => {
   };
 
   const downloadReport = async (r: Respondent) => {
+    if (!data) return;
     setDownloadingId(`report-${r.id}`);
     try {
       const blob = await generateReport({
@@ -97,8 +98,9 @@ const Assessment = () => {
         assessmentTitle,
         assessmentDate: formattedDate,
         passThreshold: threshold,
+        questionOptions: data.questionOptions,
       });
-      saveAs(blob, `${makeFileNameSafe(r.name)}_Results.pdf`);
+      saveAs(blob, `${makeFileNameSafe(r.name)}_Report.pdf`);
     } catch (err) {
       console.error(err);
       toast.error("Failed to generate report.");
@@ -112,8 +114,8 @@ const Assessment = () => {
     setGenerating(true);
     try {
       const zip = new JSZip();
-      const certFolder = zip.folder("Certificates");
-      const reportFolder = zip.folder("Reports");
+      const certFolder = zip.folder("certificates");
+      const reportFolder = zip.folder("reports");
 
       for (const r of data.respondents) {
         const reportBlob = await generateReport({
@@ -121,8 +123,9 @@ const Assessment = () => {
           assessmentTitle,
           assessmentDate: formattedDate,
           passThreshold: threshold,
+          questionOptions: data.questionOptions,
         });
-        reportFolder?.file(`${makeFileNameSafe(r.name)}_Results.pdf`, reportBlob);
+        reportFolder?.file(`${makeFileNameSafe(r.name)}_Report.pdf`, reportBlob);
 
         if (r.percent !== null && r.percent >= threshold) {
           const certBlob = await generateCertificate({
@@ -135,7 +138,7 @@ const Assessment = () => {
       }
 
       const zipBlob = await zip.generateAsync({ type: "blob" });
-      saveAs(zipBlob, `${makeFileNameSafe(assessmentTitle || "Assessment")}_Results.zip`);
+      saveAs(zipBlob, `${makeFileNameSafe(assessmentTitle || "Assessment")}_Documents.zip`);
       toast.success(`Generated ${stats.passed} certificates and ${stats.total} reports.`);
     } catch (err) {
       console.error(err);
@@ -181,6 +184,36 @@ const Assessment = () => {
       </header>
 
       <main className="vf-section space-y-6">
+        {/* Hero */}
+        <section
+          className="relative overflow-hidden rounded-3xl p-10 text-white"
+          style={{
+            background: "var(--gradient-hero)",
+            boxShadow: "var(--shadow-elegant)",
+          }}
+        >
+          <div
+            className="absolute -top-20 -right-20 w-64 h-64 rounded-full blur-3xl opacity-40"
+            style={{ background: "hsl(var(--brand-coral))" }}
+          />
+          <div
+            className="absolute -bottom-24 -left-16 w-72 h-72 rounded-full blur-3xl opacity-30"
+            style={{ background: "hsl(var(--brand-purple))" }}
+          />
+          <div className="relative max-w-2xl">
+            <p className="text-xs uppercase tracking-[0.25em] text-white/70 mb-3">
+              CAPACITI · Microsoft Forms → PDFs
+            </p>
+            <h1 className="text-3xl md:text-4xl font-bold leading-tight text-white">
+              Generate certificates &amp; result reports in one click.
+            </h1>
+            <p className="text-white/80 mt-3 text-sm md:text-base">
+              Drop in a Microsoft Forms Excel export and instantly get branded certificates for passers
+              and a full answer report for everyone. Everything runs in your browser — nothing is uploaded.
+            </p>
+          </div>
+        </section>
+
         {/* Upload card */}
         <section className="vf-card">
           <div className="flex items-start justify-between mb-4">
@@ -233,7 +266,9 @@ const Assessment = () => {
               <div className="space-y-2">
                 <Upload className="h-8 w-8 text-muted-foreground mx-auto" />
                 <p className="text-sm font-medium text-space-kadet">Click to choose .xlsx / .xls</p>
-                <p className="text-xs text-muted-foreground">Microsoft Forms export format</p>
+                <p className="text-xs text-muted-foreground">
+                  We never upload — everything runs in your browser.
+                </p>
               </div>
             )}
           </label>
