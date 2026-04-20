@@ -69,23 +69,13 @@ const META_HEADERS = new Set(
     "quiz feedback",
     "points",
     "feedback",
-    "grade",
-    "grade posted time",
-    "grade/posted time",
-    "graded",
-    "graded time",
-    "submission time",
-    "submitted",
   ].map((s) => s.toLowerCase()),
 );
 
 function isMetaHeader(h: string): boolean {
   const key = h.trim().toLowerCase();
   if (META_HEADERS.has(key)) return true;
-  // Catch any "*feedback*", "*grade*", "*posted time*" variants Forms might emit
-  if (/feedback/i.test(key)) return true;
-  if (/\bgrade\b/i.test(key)) return true;
-  if (/posted\s*time/i.test(key)) return true;
+  // "Points - Q1: ..." style columns are per-question score columns we treat separately
   return false;
 }
 
