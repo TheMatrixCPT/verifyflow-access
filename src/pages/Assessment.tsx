@@ -168,13 +168,9 @@ const Assessment = () => {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground hidden sm:inline">
+            <span className="text-sm text-foreground font-medium">
               {admin?.name} {admin?.surname}
             </span>
-            <Button variant="ghost" size="sm" onClick={() => navigate("/")}>
-              <ArrowLeft className="h-4 w-4 mr-1" />
-              Validation
-            </Button>
             <Button variant="ghost" size="sm" onClick={handleLogout}>
               <LogOut className="h-4 w-4 mr-1" />
               Logout

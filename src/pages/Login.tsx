@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { Eye, EyeOff, Loader2, FileCheck2, Award } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
 
@@ -52,18 +52,26 @@ const Login = () => {
 
         {/* Login Card */}
         <div className="vf-card p-8">
-          <Tabs value={mode} onValueChange={(v) => setMode(v as LoginMode)} className="mb-6">
-            <TabsList className="grid grid-cols-2 w-full h-11">
-              <TabsTrigger value="validation" className="gap-2 text-sm">
-                <FileCheck2 className="h-4 w-4" />
-                Document Validation
-              </TabsTrigger>
-              <TabsTrigger value="assessment" className="gap-2 text-sm">
-                <Award className="h-4 w-4" />
-                Assessment Tools
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
+          <div className="mb-6">
+            <label className="block text-sm font-medium text-foreground mb-2">
+              Select Portal
+            </label>
+            <Select value={mode} onValueChange={(v) => setMode(v as LoginMode)}>
+              <SelectTrigger className="vf-input">
+                <SelectValue placeholder="Select a portal" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="validation" className="flex items-center gap-2">
+                  <FileCheck2 className="h-4 w-4" />
+                  Document Validation
+                </SelectItem>
+                <SelectItem value="assessment" className="flex items-center gap-2">
+                  <Award className="h-4 w-4" />
+                  Assessment Tools
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
 
           <h2 className="text-xl font-semibold text-space-kadet mb-1">
             {mode === "assessment" ? "Sign in to Assessment Tools" : "Sign in to Document Validation"}

@@ -7,7 +7,6 @@ import { format } from "date-fns";
 import { toast } from "sonner";
 import { formatDateToDayMonthYear, normalizeBirthDateText } from "@/lib/dateFormatting";
 import type { CandidateData, DocumentData } from "@/components/CandidateCard";
-import jsPDF from "jspdf";
 
 const statusConfig = {
   pass: { badge: "vf-badge-success", label: "Pass", icon: CheckCircle, iconColor: "text-success" },
