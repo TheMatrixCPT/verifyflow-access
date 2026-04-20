@@ -307,7 +307,7 @@ const Assessment = () => {
 
             {/* Stats + bulk action */}
             <section className="vf-card">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
                 <div className="bg-muted/50 rounded-lg p-4">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Total</p>
                   <p className="text-2xl font-bold text-space-kadet mt-1">{stats.total}</p>
@@ -319,10 +319,6 @@ const Assessment = () => {
                 <div className="bg-error/10 rounded-lg p-4">
                   <p className="text-xs uppercase tracking-wide text-muted-foreground">Did Not Pass</p>
                   <p className="text-2xl font-bold text-space-kadet mt-1">{stats.failed}</p>
-                </div>
-                <div className="bg-warning/10 rounded-lg p-4">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">No Score</p>
-                  <p className="text-2xl font-bold text-space-kadet mt-1">{stats.missing}</p>
                 </div>
               </div>
               <Button
