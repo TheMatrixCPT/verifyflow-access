@@ -20,6 +20,8 @@ export interface Respondent {
 export interface ParsedWorkbook {
   formTitle: string;
   questions: string[];
+  /** For each question, the unique set of selected values across all respondents (sorted). */
+  questionOptions: Record<string, string[]>;
   respondents: Respondent[];
 }
 
@@ -39,16 +41,19 @@ export function normalizeName(input: string | undefined | null): string {
 
   if (!raw) return "Unknown Respondent";
 
-  return raw
-    .split(" ")
-    .filter(Boolean)
-    .map((part) =>
-      part
-        .split("'")
-        .map((sub) => (sub ? sub[0].toUpperCase() + sub.slice(1).toLowerCase() : sub))
-        .join("'"),
-    )
-    .join(" ");
+  // Title-case while preserving hyphens AND apostrophes (o'brien → O'Brien, mary-jane → Mary-Jane)
+  const titleCaseToken = (token: string): string =>
+    token
+      .split("-")
+      .map((seg) =>
+        seg
+          .split("'")
+          .map((sub) => (sub ? sub[0].toUpperCase() + sub.slice(1).toLowerCase() : sub))
+          .join("'"),
+      )
+      .join("-");
+
+  return raw.split(" ").filter(Boolean).map(titleCaseToken).join(" ");
 }
 
 /** Identify whether a header is a metadata column rather than a question. */
