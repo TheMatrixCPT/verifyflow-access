@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Upload, FileSpreadsheet, Download, Award, FileText, Loader2, ArrowLeft, LogOut, X } from "lucide-react";
+import { Upload, FileSpreadsheet, Download, Award, FileText, Loader2, LogOut, X, Link2, ListChecks } from "lucide-react";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,38 @@ const Assessment = () => {
   );
   const [threshold, setThreshold] = useState<number>(75);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [quizLink, setQuizLink] = useState<string>("");
+  /** Per-question option overrides — paste full multiple-choice list from the MS Forms quiz link. */
+  const [optionOverrides, setOptionOverrides] = useState<Record<string, string>>({});
+  const [showOptionsEditor, setShowOptionsEditor] = useState<boolean>(false);
+
+  /** Merge parser-derived options with admin overrides so the report shows ALL choices. */
+  const mergedQuestionOptions = useMemo(() => {
+    if (!data) return {} as Record<string, string[]>;
+    const out: Record<string, string[]> = {};
+    for (const q of data.questions) {
+      const override = optionOverrides[q];
+      if (override && override.trim()) {
+        const parsed = override
+          .split(/\r?\n/)
+          .map((s) => s.replace(/^\s*[-*•\d.)]+\s*/, "").trim())
+          .filter(Boolean);
+        // De-dupe while preserving order
+        const seen = new Set<string>();
+        const unique: string[] = [];
+        for (const p of parsed) {
+          if (!seen.has(p)) {
+            seen.add(p);
+            unique.push(p);
+          }
+        }
+        out[q] = unique.length > 0 ? unique : data.questionOptions[q] ?? [];
+      } else {
+        out[q] = data.questionOptions[q] ?? [];
+      }
+    }
+    return out;
+  }, [data, optionOverrides]);
 
   const handleFile = async (file: File | null) => {
     if (!file) return;
