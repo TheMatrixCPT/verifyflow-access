@@ -570,7 +570,7 @@ serve(async (req) => {
     }
 
     // ── SA ID Structural Validation (Luhn checksum) ──
-    extracted.extracted_info = normalizeExtractedInfo(extracted.extracted_info);
+    extracted.extracted_info = normalizeExtractedInfo(extracted.extracted_info) ?? null;
     const idToValidate = extracted.extracted_id_number || extracted.extracted_info?.id_number;
     let saIdValidation: Record<string, any> | null = null;
 
