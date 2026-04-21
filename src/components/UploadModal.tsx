@@ -250,10 +250,11 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId, replacement
     }
 
     if (existingSessionId) {
-      const conflicts = await checkSessionUploadConflicts(existingSessionId, files);
+      const rawFiles = files.map((f) => f.file);
+      const conflicts = await checkSessionUploadConflicts(existingSessionId, rawFiles);
       setUploadConflicts(conflicts);
 
-      const fileNames = files.map(f => f.name);
+      const fileNames = rawFiles.map((f) => f.name);
       const dupes = await checkDuplicateFiles(existingSessionId, fileNames);
       const typeConflicts = conflicts
         .filter((conflict) => conflict.existingDocumentId)
