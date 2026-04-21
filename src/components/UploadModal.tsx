@@ -161,7 +161,7 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId, replacement
     });
   };
 
-  const processFiles = async (filesToProcess: File[], replaceExisting: boolean) => {
+  const processFiles = async (filesToProcess: FileWithPath[], replaceExisting: boolean) => {
     setIsProcessing(true);
     setShowDuplicateDialog(false);
     setShowCrossCohortDialog(false);
@@ -204,7 +204,7 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId, replacement
     }
   };
 
-  const proceedAfterCrossCohortCheck = async (filesToProcess: File[], replaceExisting: boolean) => {
+  const proceedAfterCrossCohortCheck = async (filesToProcess: FileWithPath[], replaceExisting: boolean) => {
     if (replacementTarget) {
       await processFiles(filesToProcess, replaceExisting);
       return;
@@ -213,7 +213,7 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId, replacement
     // Check cross-cohort candidates
     const matches = await checkCrossCohortCandidates(
       existingSessionId,
-      filesToProcess.map(f => f.name)
+      filesToProcess.map((f) => f.file.name)
     );
 
     if (matches.length > 0) {
