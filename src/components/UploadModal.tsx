@@ -433,18 +433,58 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId, replacement
                 onClick={() => document.getElementById("file-input")?.click()}
               >
                 <Upload className="h-16 w-16 text-purple mb-4" />
-                <h3 className="text-lg font-semibold text-space-kadet mb-1">{replacementTarget ? "Drop the corrected document here" : "Drop all candidate documents here"}</h3>
-                <p className="text-muted-foreground text-sm mb-2">{replacementTarget ? "Or click to browse and select one replacement file" : "Or click to browse and select multiple files"}</p>
-                <p className="text-muted-foreground text-[13px]">PDF, JPG, JPEG, PNG up to 10MB each</p>
+                <h3 className="text-lg font-semibold text-space-kadet mb-1">{replacementTarget ? "Drop the corrected document here" : "Drop files or a folder of candidate documents"}</h3>
+                <p className="text-muted-foreground text-sm mb-2">{replacementTarget ? "Or click to browse and select one replacement file" : "Choose individual files or upload an entire folder (subfolders included)"}</p>
+                <p className="text-muted-foreground text-[13px]">PDF, DOCX, JPG, JPEG, PNG, WEBP up to 10MB each</p>
                 <p className="text-purple text-sm font-semibold mt-2">AI auto-detects document type and candidate name</p>
-                <input id="file-input" type="file" multiple={!replacementTarget} accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={handleFileInput} />
+                {!replacementTarget && (
+                  <div className="flex items-center gap-2 mt-4" onClick={(e) => e.stopPropagation()}>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => document.getElementById("file-input")?.click()}
+                    >
+                      <FileText className="h-4 w-4" />
+                      Choose Files
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => folderInputRef.current?.click()}
+                    >
+                      <FolderOpen className="h-4 w-4" />
+                      Choose Folder
+                    </Button>
+                  </div>
+                )}
+                <input
+                  id="file-input"
+                  type="file"
+                  multiple={!replacementTarget}
+                  accept=".pdf,.jpg,.jpeg,.png,.webp,.docx"
+                  className="hidden"
+                  onChange={handleFileInput}
+                />
+                {!replacementTarget && (
+                  <input
+                    ref={folderInputRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={handleFolderInput}
+                    // webkitdirectory enables folder selection in Chromium/WebKit/Firefox
+                    {...({ webkitdirectory: "", directory: "" } as React.InputHTMLAttributes<HTMLInputElement>)}
+                  />
+                )}
               </div>
 
               {files.length > 0 && (
                 <div className="mt-6">
                   <p className="vf-label">{files.length} file{files.length !== 1 ? "s" : ""} selected</p>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-2 max-h-[200px] overflow-y-auto">
-                    {files.map((file, index) => (
+                    {files.map((entry, index) => (
                       <div key={index} className="bg-card border border-border rounded-lg p-3 relative group">
                         <button
                           onClick={(e) => { e.stopPropagation(); removeFile(index); }}
@@ -453,8 +493,11 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId, replacement
                           <X className="h-3 w-3" />
                         </button>
                         <FileText className="h-8 w-8 text-purple mb-2" />
-                        <p className="text-[13px] font-medium text-space-kadet truncate">{file.name}</p>
-                        <p className="text-[11px] text-muted-foreground">{(file.size / 1024).toFixed(0)} KB</p>
+                        <p className="text-[13px] font-medium text-space-kadet truncate" title={entry.relativePath}>{entry.file.name}</p>
+                        {entry.folderHint && (
+                          <p className="text-[11px] text-purple truncate" title={entry.relativePath}>📁 {entry.folderHint}</p>
+                        )}
+                        <p className="text-[11px] text-muted-foreground">{(entry.file.size / 1024).toFixed(0)} KB</p>
                       </div>
                     ))}
                   </div>
