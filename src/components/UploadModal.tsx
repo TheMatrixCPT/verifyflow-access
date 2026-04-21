@@ -1,5 +1,5 @@
-import { useState, useCallback, useEffect } from "react";
-import { X, Upload, FileText, Loader2, AlertTriangle, Users } from "lucide-react";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { X, Upload, FileText, Loader2, AlertTriangle, Users, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   createSession,
@@ -10,6 +10,13 @@ import {
   type UploadConflict,
   type UploadFileInstruction,
 } from "@/lib/api";
+import {
+  collectFilesFromDataTransfer,
+  collectFilesFromInput,
+  fallbackFromPlainFiles,
+  isAllowedFile,
+  type FileWithPath,
+} from "@/lib/folderUpload";
 import { toast } from "sonner";
 import {
   AlertDialog,
