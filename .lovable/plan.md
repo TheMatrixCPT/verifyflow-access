@@ -1,70 +1,45 @@
 
 
-## Update Document Validation Checklist
+## Add Folder Upload to Bulk Upload
 
-Expand the document validation system from the current 5 document types to the full **15-document Capaciti checklist**, each with its own specific validation rules and file naming convention. The Assessment Tools system will not be touched.
+Extend the existing bulk upload flow so admins can drop (or pick) an entire folder of candidate documents instead of selecting files one-by-one. The Assessment Tools system will not be touched.
 
-### New / Updated Document Types
+### What Changes for the User
 
-The AI extractor will now classify and validate documents into one of these types:
+In the **Upload Modal** (Document Validation flow only):
+- The existing file picker gets a new sibling button: **"Choose Folder"**.
+- The drop zone now also accepts folders dragged from the OS file explorer — every file inside (including nested subfolders) is collected recursively.
+- Each file's relative path inside the folder is preserved and shown in the file list (e.g. `JohnDoe/BA.pdf`) so admins can see the folder structure they uploaded.
+- Subfolder names are used as a hint for candidate grouping — files inside the same subfolder are biased toward being grouped under the same candidate, on top of the existing name-matching algorithm.
 
-1. Certified ID
-2. Unemployment Affidavit
-3. EEA1 Form
-4. PWDS Confirmation of Disability
-5. Social Media Consent
-6. Beneficiary Agreement (BA)
-7. Offer / Employment Letter
-8. Employment Contract / FTC
-9. Certificate of Completion
-10. Bank Letter
-11. TCX Unemployment Affidavit
-12. CV (informational, no QA)
-13. Capaciti Declaration (internal)
-14. Qualification / Matric (informational, MIE handled externally)
-15. Tax Certificate (payroll, no QA)
-16. Other (fallback)
-
-### Per-Document Validation Rules
-
-Each document gets its own checklist driven by the user-supplied requirements (certification within programme year, signed/dated stamps, barcode visibility, completed fields, race/gender marks, HPCSA numbers, page-specific signatures/initials, ID/name match, bank validity, etc.). Documents marked "no QA" (CV, Bank Letter, Tax Certificate, Qualification/Matric) only run lightweight extraction checks (presence + readability) and never hard-fail the candidate.
-
-### File Naming Validation (new)
-
-A new generic check is added for every type: filename should match the convention `CandidateNameSurname_IDNo_<DocSuffix>` (e.g. `_BA`, `_FTC`, `_CV`, `_Bank Letter`, `_Completionoftraining`). Mismatched naming surfaces as a **warning** (not a fail) so admins can rename without blocking validation.
+Everything else (duplicate resolution, session naming, cross-cohort checks, AI processing, candidate cards) stays exactly the same.
 
 ### Where the Changes Land
 
-**1. `supabase/functions/process-document/index.ts`** (primary change)
-- Replace the `document_type` enum in the tool schema with the 15 new types + `Other`.
-- Rewrite `buildSystemPrompt` so each of the 15 types has its own `═══ N. TYPE ═══` block listing the exact checks from your spec (page numbers, fields, stamps, signatures, HPCSA numbers, programme-year stamp date, etc.).
-- Add a shared "File Naming Convention" section the AI applies to every document.
-- Keep the existing SA ID structural validation (Luhn, gender, citizenship) — it continues to run when an ID number is extracted.
-- Keep the existing cross-reference logic (ID number must match candidate's ID document where applicable).
-- Replace the "stamp within X months" check with "stamp date within the **programme year**" for Certified ID specifically (configurable months remain for other types).
+**1. `src/components/UploadModal.tsx`** (only file with UI changes)
+- Add a second hidden `<input type="file" webkitdirectory directory multiple />` and a "Choose Folder" button next to the existing "Choose Files" button.
+- Update the drop zone's `onDrop` handler to use the `DataTransferItemList` API and walk `webkitGetAsEntry()` recursively, collecting every `FileSystemFileEntry` into a flat `File[]` while stamping each file with its `webkitRelativePath`-equivalent path.
+- Render the relative path under the filename in the staged-files list.
+- Filter to allowed extensions (`.pdf`, `.png`, `.jpg`, `.jpeg`, `.webp`, `.docx`) — silently skip junk like `.DS_Store`, `Thumbs.db`, hidden files.
+- Enforce the existing per-file size limit and show a toast for any skipped files.
 
-**2. `src/lib/validationScore.ts` / scoring**
-- No structural change — the global `(passed ÷ total) × 100` formula keeps working because each new type just produces more granular checks. "Optional" / "no-QA" checks remain prefixed `Optional -` and excluded from the failing logic.
+**2. `src/lib/` — new helper `folderUpload.ts`**
+- `collectFilesFromDataTransfer(items: DataTransferItemList): Promise<FileWithPath[]>` — recursive `FileSystemDirectoryReader` walker.
+- `collectFilesFromInput(fileList: FileList): FileWithPath[]` — wraps files coming from a `webkitdirectory` input and preserves `webkitRelativePath`.
+- Returns a uniform `FileWithPath = { file: File; relativePath: string; folderHint: string | null }` where `folderHint` is the immediate parent folder name (used for grouping).
 
-**3. `mem://features/validation-rules`**
-- Update the memory file to list all 15 document types and the new file-naming check, replacing the old "5 doc types" line.
+**3. `src/lib/` — extend the existing grouping logic**
+- The current name-matching algorithm in the document-grouping module gets one extra signal: when two files share the same non-empty `folderHint`, they get a strong boost toward being grouped under the same candidate. Name-matching remains the primary signal so existing behaviour for flat uploads is unchanged.
 
 ### Out of Scope
-
-- No DB schema migration required — `documents.document_type` is a free-text column; the enum is enforced only inside the AI tool schema.
-- No UI changes to upload flow, candidate cards, or Settings (existing components already render whatever check list comes back from the edge function).
-- Assessment Tools system is untouched.
+- No DB schema change — relative paths are kept in memory only for the upload session and used to drive grouping; we do **not** persist `relative_path` on the `documents` table.
+- No change to the edge function, AI prompts, validation rules, or the Assessment Tools system.
+- No change to session naming, duplicate resolution, or cross-cohort checks.
 
 ### Technical Details
-
-- The tool schema's `document_type` enum becomes the 16-value list above; the AI is forced to pick one.
-- Each per-type prompt section ends with the file-naming pattern, e.g. `File naming convention: CandidateNameSurname_IDNo_BA → emit a warning check "File naming convention" if the filename does not match`.
-- For PWDS the prompt explicitly asks for: specialist signature + date, type of disability, HPCSA practice + personal numbers (private) or HPCSA personal number (public), doctor contact info, doctor's stamp.
-- For BA, Employment Contract, and Social Media Consent, the prompt instructs the AI to inspect specific pages (12, 13, 17 for BA; 10, 11, 12 for FTC; pages 1, 2, 4 for Social Media) and report initials on every page as a single aggregated check.
-- For EEA1 the existing race + foreign-national logic stays; new checks added for "person with disability Yes/No", "employment number not required", "full name and surname displayed".
-- For Bank Letter: "Valid SA bank" (compare extracted bank name against a built-in list of registered SA banks: ABSA, Standard Bank, FNB, Nedbank, Capitec, Investec, African Bank, TymeBank, Discovery Bank, Bidvest, Sasfin, Bank Zero, Access Bank), "valid account number present", "account holder identifiers match candidate".
-- For TCX Affidavit: question 1 + 2 must be circled "NO"; full name structure (first, second, surname) verified against ID.
-- Certificate of Completion: signed and dated by Programme Manager / Executive of IP.
-- Capaciti Declaration: signed + dated only.
-- "No-QA" document types (CV, Tax Certificate, Qualification/Matric, Bank Letter per spec note) emit informational checks only, all marked `Optional -` so they cannot drive the candidate to a fail status.
+- Folder traversal uses the standard `DataTransferItem.webkitGetAsEntry()` → `FileSystemDirectoryEntry.createReader().readEntries()` loop, paginated until `readEntries` returns an empty array (Chromium quirk).
+- The `<input webkitdirectory>` attribute is supported in all evergreen browsers; we cast via `React.InputHTMLAttributes` augmentation to satisfy TypeScript.
+- `folderHint` is computed as the **first path segment** of the relative path when the file lives inside a subfolder, otherwise `null`. Top-level files behave exactly as today.
+- Grouping boost is additive and capped so a strong name match still beats a weak folder coincidence — protects against admins dumping unrelated files into one folder.
+- Skipped/invalid files are surfaced in a single summary toast (`"3 files skipped: unsupported type or hidden"`) instead of one toast per file.
 
