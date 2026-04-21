@@ -1,5 +1,5 @@
-import { useState, useCallback, useEffect } from "react";
-import { X, Upload, FileText, Loader2, AlertTriangle, Users } from "lucide-react";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { X, Upload, FileText, Loader2, AlertTriangle, Users, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   createSession,
@@ -10,6 +10,13 @@ import {
   type UploadConflict,
   type UploadFileInstruction,
 } from "@/lib/api";
+import {
+  collectFilesFromDataTransfer,
+  collectFilesFromInput,
+  fallbackFromPlainFiles,
+  isAllowedFile,
+  type FileWithPath,
+} from "@/lib/folderUpload";
 import { toast } from "sonner";
 import {
   AlertDialog,
@@ -50,18 +57,19 @@ interface CrossCohortMatch {
 const UploadModal = ({ open, onClose, onComplete, existingSessionId, replacementTarget }: UploadModalProps) => {
   const [sessionName, setSessionName] = useState("");
   const [sessionNameError, setSessionNameError] = useState("");
-  const [files, setFiles] = useState<File[]>([]);
+  const [files, setFiles] = useState<FileWithPath[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState({ processed: 0, total: 0 });
   const [duplicates, setDuplicates] = useState<DuplicateInfo[]>([]);
   const [uploadConflicts, setUploadConflicts] = useState<UploadConflict[]>([]);
   const [showDuplicateDialog, setShowDuplicateDialog] = useState(false);
-  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [pendingFiles, setPendingFiles] = useState<FileWithPath[]>([]);
   const [pendingInstructions, setPendingInstructions] = useState<UploadFileInstruction[]>([]);
   const [crossCohortMatches, setCrossCohortMatches] = useState<CrossCohortMatch[]>([]);
   const [showCrossCohortDialog, setShowCrossCohortDialog] = useState(false);
   const [pendingReplaceFlag, setPendingReplaceFlag] = useState(false);
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (replacementTarget) {
@@ -74,31 +82,63 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId, replacement
     }
   }, [replacementTarget]);
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
+  const reportSkipped = (originalCount: number, kept: FileWithPath[]) => {
+    const skipped = originalCount - kept.length;
+    if (skipped > 0) {
+      toast.info(`${skipped} file${skipped !== 1 ? "s" : ""} skipped: unsupported type or hidden`);
+    }
+  };
+
+  const addFiles = (incoming: FileWithPath[], originalCount: number) => {
+    reportSkipped(originalCount, incoming);
+    if (incoming.length === 0) return;
+    setFiles((prev) => (replacementTarget ? incoming.slice(0, 1) : [...prev, ...incoming]));
+  };
+
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    const droppedFiles = Array.from(e.dataTransfer.files);
-    setFiles((prev) => replacementTarget ? droppedFiles.slice(0, 1) : [...prev, ...droppedFiles]);
+    const items = e.dataTransfer.items;
+    let collected: FileWithPath[] = [];
+    let originalCount = 0;
+    if (items && items.length && (items[0] as unknown as { webkitGetAsEntry?: () => unknown }).webkitGetAsEntry) {
+      collected = await collectFilesFromDataTransfer(items);
+      originalCount = e.dataTransfer.files.length || collected.length;
+    } else {
+      const dropped = Array.from(e.dataTransfer.files);
+      originalCount = dropped.length;
+      collected = fallbackFromPlainFiles(dropped);
+    }
+    addFiles(replacementTarget ? collected.slice(0, 1) : collected, originalCount);
   }, [replacementTarget]);
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      const selectedFiles = Array.from(e.target.files!);
-      setFiles((prev) => replacementTarget ? selectedFiles.slice(0, 1) : [...prev, ...selectedFiles]);
-    }
+    if (!e.target.files) return;
+    const original = e.target.files.length;
+    const collected = collectFilesFromInput(e.target.files);
+    addFiles(collected, original);
+    e.target.value = "";
+  };
+
+  const handleFolderInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files) return;
+    const original = e.target.files.length;
+    const collected = collectFilesFromInput(e.target.files);
+    addFiles(collected, original);
+    e.target.value = "";
   };
 
   const removeFile = (index: number) => {
     setFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const buildInstructions = (filesToProcess: File[], replaceExisting: boolean): UploadFileInstruction[] => {
+  const buildInstructions = (filesToProcess: FileWithPath[], replaceExisting: boolean): UploadFileInstruction[] => {
     if (replacementTarget) {
-      const firstFile = filesToProcess[0];
-      if (!firstFile) return [];
+      const first = filesToProcess[0];
+      if (!first) return [];
 
       return [{
-        file: firstFile,
+        file: first.file,
         targetCandidateId: replacementTarget.candidateId,
         replacementDocumentId: replacementTarget.documentId,
         inferredDocumentType: replacementTarget.documentType,
@@ -106,19 +146,22 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId, replacement
       }];
     }
 
-    return filesToProcess.map((file) => {
-      const conflict = uploadConflicts.find((item) => item.fileName === file.name);
+    return filesToProcess.map((entry) => {
+      const conflict = uploadConflicts.find((item) => item.fileName === entry.file.name);
+      // Folder hint biases grouping when AI extraction is ambiguous; conflict
+      // match (an existing candidate already in the session) always wins.
+      const matchedCandidateName = conflict?.candidateName || entry.folderHint || undefined;
       return {
-        file,
+        file: entry.file,
         targetCandidateId: conflict?.candidateId,
         replacementDocumentId: replaceExisting ? conflict?.existingDocumentId : undefined,
         inferredDocumentType: conflict?.inferredDocumentType,
-        matchedCandidateName: conflict?.candidateName,
+        matchedCandidateName,
       };
     });
   };
 
-  const processFiles = async (filesToProcess: File[], replaceExisting: boolean) => {
+  const processFiles = async (filesToProcess: FileWithPath[], replaceExisting: boolean) => {
     setIsProcessing(true);
     setShowDuplicateDialog(false);
     setShowCrossCohortDialog(false);
@@ -161,7 +204,7 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId, replacement
     }
   };
 
-  const proceedAfterCrossCohortCheck = async (filesToProcess: File[], replaceExisting: boolean) => {
+  const proceedAfterCrossCohortCheck = async (filesToProcess: FileWithPath[], replaceExisting: boolean) => {
     if (replacementTarget) {
       await processFiles(filesToProcess, replaceExisting);
       return;
@@ -170,7 +213,7 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId, replacement
     // Check cross-cohort candidates
     const matches = await checkCrossCohortCandidates(
       existingSessionId,
-      filesToProcess.map(f => f.name)
+      filesToProcess.map((f) => f.file.name)
     );
 
     if (matches.length > 0) {
@@ -207,10 +250,11 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId, replacement
     }
 
     if (existingSessionId) {
-      const conflicts = await checkSessionUploadConflicts(existingSessionId, files);
+      const rawFiles = files.map((f) => f.file);
+      const conflicts = await checkSessionUploadConflicts(existingSessionId, rawFiles);
       setUploadConflicts(conflicts);
 
-      const fileNames = files.map(f => f.name);
+      const fileNames = rawFiles.map((f) => f.name);
       const dupes = await checkDuplicateFiles(existingSessionId, fileNames);
       const typeConflicts = conflicts
         .filter((conflict) => conflict.existingDocumentId)
@@ -389,18 +433,58 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId, replacement
                 onClick={() => document.getElementById("file-input")?.click()}
               >
                 <Upload className="h-16 w-16 text-purple mb-4" />
-                <h3 className="text-lg font-semibold text-space-kadet mb-1">{replacementTarget ? "Drop the corrected document here" : "Drop all candidate documents here"}</h3>
-                <p className="text-muted-foreground text-sm mb-2">{replacementTarget ? "Or click to browse and select one replacement file" : "Or click to browse and select multiple files"}</p>
-                <p className="text-muted-foreground text-[13px]">PDF, JPG, JPEG, PNG up to 10MB each</p>
+                <h3 className="text-lg font-semibold text-space-kadet mb-1">{replacementTarget ? "Drop the corrected document here" : "Drop files or a folder of candidate documents"}</h3>
+                <p className="text-muted-foreground text-sm mb-2">{replacementTarget ? "Or click to browse and select one replacement file" : "Choose individual files or upload an entire folder (subfolders included)"}</p>
+                <p className="text-muted-foreground text-[13px]">PDF, DOCX, JPG, JPEG, PNG, WEBP up to 10MB each</p>
                 <p className="text-purple text-sm font-semibold mt-2">AI auto-detects document type and candidate name</p>
-                <input id="file-input" type="file" multiple={!replacementTarget} accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={handleFileInput} />
+                {!replacementTarget && (
+                  <div className="flex items-center gap-2 mt-4" onClick={(e) => e.stopPropagation()}>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => document.getElementById("file-input")?.click()}
+                    >
+                      <FileText className="h-4 w-4" />
+                      Choose Files
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => folderInputRef.current?.click()}
+                    >
+                      <FolderOpen className="h-4 w-4" />
+                      Choose Folder
+                    </Button>
+                  </div>
+                )}
+                <input
+                  id="file-input"
+                  type="file"
+                  multiple={!replacementTarget}
+                  accept=".pdf,.jpg,.jpeg,.png,.webp,.docx"
+                  className="hidden"
+                  onChange={handleFileInput}
+                />
+                {!replacementTarget && (
+                  <input
+                    ref={folderInputRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={handleFolderInput}
+                    // webkitdirectory enables folder selection in Chromium/WebKit/Firefox
+                    {...({ webkitdirectory: "", directory: "" } as React.InputHTMLAttributes<HTMLInputElement>)}
+                  />
+                )}
               </div>
 
               {files.length > 0 && (
                 <div className="mt-6">
                   <p className="vf-label">{files.length} file{files.length !== 1 ? "s" : ""} selected</p>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-2 max-h-[200px] overflow-y-auto">
-                    {files.map((file, index) => (
+                    {files.map((entry, index) => (
                       <div key={index} className="bg-card border border-border rounded-lg p-3 relative group">
                         <button
                           onClick={(e) => { e.stopPropagation(); removeFile(index); }}
@@ -409,8 +493,11 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId, replacement
                           <X className="h-3 w-3" />
                         </button>
                         <FileText className="h-8 w-8 text-purple mb-2" />
-                        <p className="text-[13px] font-medium text-space-kadet truncate">{file.name}</p>
-                        <p className="text-[11px] text-muted-foreground">{(file.size / 1024).toFixed(0)} KB</p>
+                        <p className="text-[13px] font-medium text-space-kadet truncate" title={entry.relativePath}>{entry.file.name}</p>
+                        {entry.folderHint && (
+                          <p className="text-[11px] text-purple truncate" title={entry.relativePath}>📁 {entry.folderHint}</p>
+                        )}
+                        <p className="text-[11px] text-muted-foreground">{(entry.file.size / 1024).toFixed(0)} KB</p>
                       </div>
                     ))}
                   </div>
