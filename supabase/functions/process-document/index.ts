@@ -127,156 +127,204 @@ ${crossReferenceContext.available
 
 DOCUMENT TYPES AND THEIR SPECIFIC VALIDATION RULES:
 
-═══ 1. ID DOCUMENT ═══
-Required checks (each must be reported as pass/fail):
+═══ SHARED FILE NAMING CONVENTION (applies to every document) ═══
+Every Capaciti document filename should follow:
+  CandidateNameSurname_IDNo_<DocSuffix>
+Examples: "JohnDoe_9001015009087_BA.pdf", "JaneSmith_8505126789012_Bank Letter.pdf".
+For every document, add ONE check named "File naming convention" with status:
+- "pass" if the filename appears to match the convention (candidate name/surname segment + a 13-digit ID segment + a recognisable doc suffix for the matched document type),
+- "warning" otherwise (NEVER fail). Detail must explain what is missing or wrong (e.g. "Missing 13-digit ID number in filename" or "Suffix should be _BA").
+Recognised suffixes per type:
+  Certified ID → _IDNo_FileName (any trailing label)
+  Unemployment Affidavit → _Unemployment Affidavit (or similar)
+  EEA1 Form → _EEA1 Form
+  PWDS Confirmation of Disability → _PWD
+  Social Media Consent → _Social Media Consent
+  Beneficiary Agreement → _BA
+  Offer Letter → _Offerletter
+  Employment Contract FTC → _FTC
+  Certificate of Completion → _Completionoftraining
+  Bank Letter → _Bank Letter
+  TCX Unemployment Affidavit → _TCX (or _Unemployment Affidavit)
+  CV → _CV
+  Capaciti Declaration → _Declaration
+  Qualification Matric → _Matric or _Qualification
+  Tax Certificate → _Tax number
+
+═══ 1. CERTIFIED ID ═══
+Required checks:
 - Image clarity: Is the image clear and not blurry?
-- Full document visible: No clipping or cut-off edges
-- ID number readable: Can the SA ID number (13 digits) be extracted?
-- Certification stamp present: Is there a commissioner of oaths / police stamp?
-- Stamp authority: Identify WHO stamped it — is it a Police Station (name the station) or Commissioner of Oaths? Report the police station name or commissioner details.
-- Stamp date present: Can you read a date on the stamp?
-- Stamp date validity: Is the stamp date ≤ ${stampValidityMonths} months old from today (${today})? Calculate the difference.
-- Is Certified: Does the document bear a "certified true copy" notation or equivalent certification mark?
-- Commissioner signature: Is there a signature next to the stamp?
-- Document may be skewed/folded (photo from camera on uneven surface) — still must be readable
-- The stamp may be faint — the critical parts are: date of validation + commissioner's signature next to stamp
-- IMPORTANT: Extract and report the stamp date, police station name, and certification authority in dedicated fields.
+- ID number readable: 13-digit SA ID number visible and legible
+- All ID details legible: name, surname, date of birth, photo
+- Certification stamp present (Commissioner of Oaths or Police)
+- Stamp authority: identify Police Station name OR Commissioner of Oaths
+- Stamp signed: signature next to the certification stamp
+- Stamp dated: a date is written/printed on the stamp
+- Stamp date within the PROGRAMME YEAR: the certification date must fall within the current calendar year (year of the programme = year of TODAY's date ${today.substring(0, 4)}). If the date is from a previous year → fail. Use this rule INSTEAD of the generic "${stampValidityMonths} month" rule for Certified ID.
+- Barcode visible (if it is a card-type ID — barcode should be visible on the back). For book IDs this is N/A — emit as "Optional - Barcode visibility" warning.
+- Extract: stamp_date, police_station, certification_authority.
 
-═══ 2. SIGNED CONTRACT ═══
+═══ 2. UNEMPLOYMENT AFFIDAVIT ═══
 Required checks:
-- Review ALL pages before deciding whether a signature or date is missing
-- Multi-page contracts are common: inspect every page from first to last before deciding a signature or date is missing
-- Signature pages may appear near the end, on a dedicated acceptance page, or on separate employer/employee signature pages
-- Signature present on the relevant signature page
-- Date present at the end of the document or on the relevant signature page
-- ID number present in the contract
-- ID number matches the candidate's ID document only when uploaded ID context is explicitly available above
-- Do NOT fail a contract because a personal-details page or non-signature page does not contain a signature
-- If the contract has dedicated signature pages later in the document, use those pages for the signature check
-- Page 10 employee details is an information page and does NOT require the employee's or employer's signature
-- Some contracts require only the employee signature, while others require both employee and employer signatures
-- Determine from the contract wording and signature blocks whether employee only or both parties are required
-- Do NOT fail the contract for a missing employer signature if the contract only requires the employee
-- Extract the actual signature/date findings from the correct signature page instead of earlier information pages
+- Candidate full name and surname filled in
+- Candidate 13-digit ID number filled in
+- Date filled in (sworn/signed date)
+- All other required fields completed (no blanks)
+- Candidate signature present
+- Certification stamp present, signed and dated by Commissioner of Oaths / Police
+- Stamp date within the last ${stampValidityMonths} months
+- Sworn/signed date corresponds to the certification stamp date (same day or within a few days). Mismatch → fail.
+- Follows the standard Capaciti Unemployment Skills Training Affidavit template (V100595).
 
-═══ 3. EEA1 FORM (Employment Equity Act) ═══
+═══ 3. EEA1 FORM (Department of Labour) ═══
 Required checks:
-- All required fields completed (not blank)
-- Text is legible
-- Signature present
-- Date present
-- Extract the selected race category when present and store it in extracted_info.race
-- CRITICAL: Check the foreign-national answer, even if the form uses different wording
-  → For nationality on this form, the answer is captured as "Yes" or "No"
-  → "No" means the person is South African
-  → "Yes" means the person is a foreign national and must provide the acquired date of nationality / residence
-  → Some forms may also use "South African" vs "Foreigner", but prefer the explicit Yes / No answer when present
-  → Normalize the result into extracted_info.foreign_national as true or false
-  → If the answer is "Yes" → mark extracted_info.foreign_national as true
-  → If the answer is "No" → mark extracted_info.foreign_national as false
-  → If foreign national is true, look for the acquired date of nationality, residence date, or permit-related date and store it in extracted_info.foreign_national_support_date
-  → If foreign national is true and the required acquired / residence / permit date is missing → REJECT (status: fail)
-  → If the field is contradictory or unreadable → REJECT (status: fail)
+- Race marked properly (single clear selection) — extract into extracted_info.race
+- Gender marked properly
+- Full name AND surname displayed
+- Signed by candidate
+- Dated by candidate
+- "Person with disability" question answered Yes or No (must be answered)
+- Foreign National field: must state "No" (South African) OR "N/A" OR "Yes" with supporting acquired/residence/permit date
+  → Normalize into extracted_info.foreign_national (true/false)
+  → If Yes and no acquired/residence/permit date → fail
+- Employment number: NOT required — emit "Optional - Employment number" pass/info regardless of whether it is filled.
 
-═══ 4. AFFIDAVIT ═══
+═══ 4. PWDS CONFIRMATION OF DISABILITY ═══
 Required checks:
-- Document is signed
-- Document is dated
-- ID number is present
-- ID number matches the candidate's ID document only when uploaded ID context is explicitly available above
-- Commissioner of Oaths stamp present — identify the police station or commissioner
-- Stamp date present and valid (within ${stampValidityMonths} months)
-- Follows standard Capaciti affidavit format
+- Type of disability is stated
+- Disability confirmed by a relevant SPECIALIST medical doctor (not a generic GP note)
+- Specialist signed AND dated the document
+- Doctor's official stamp present
+- Doctor's contact information completed (practice address / phone)
+- HPCSA registration: 
+    • If PRIVATE practice doctor → BOTH HPCSA practice number AND HPCSA personal registration number must be present
+    • If PUBLIC clinic / hospital doctor → HPCSA personal registration number must be present (practice number not required)
+- All required fields on the form completed by the doctor
+- Follows Capaciti Doctors Disability Certificate template (V100591) where applicable, but do NOT fail purely on layout if all clinical info is present.
 
-═══ 5. ATTENDANCE / TRAINING REGISTER ═══
+═══ 5. SOCIAL MEDIA CONSENT (Naspers Labs Letterhead template) ═══
 Required checks:
-- Candidate's ID number appears in the document
-- ID matches the candidate
-- Signature present next to the candidate's name/ID
-- Date present and valid
-- This may be a scanned paper register with multiple candidate names
+- Page 1 completed by candidate (personal details filled)
+- Page 2: Graduate / Beneficiary signature AND date present
+- Page 2: Graduate / Beneficiary printed name present
+- Host partner / Delivery partner signature section: blank is ACCEPTABLE → emit "Optional - Host partner signature" warning if blank, pass if filled
+- Page 4: blank is ACCEPTABLE → emit "Optional - Page 4" pass/info
+- Inspect ALL pages before deciding a signature is missing.
 
-═══ 6. POLICE CLEARANCE ═══
+═══ 6. BENEFICIARY AGREEMENT (BA) ═══
 Required checks:
-- Document issued by SAPS (South African Police Service)
-- Police station name clearly visible — extract and report it
-- Issue date present and valid
-- Reference number present
-- Candidate name matches
-- ID number present and matches
-- Document is not expired (check validity period)
-- Official SAPS stamp/seal present
+- Front page: candidate name, surname, AND 13-digit ID number filled in
+- ID number matches the candidate's ID document (only if cross-reference context above is available)
+- Initialled on EVERY page (aggregate into a single check "Initials on every page" — fail if any page is missing initials)
+- Page 12: beneficiary signature AND printed name filled in
+- Page 13: beneficiary section completed (all fields filled)
+- Page 17: signed AND printed name by beneficiary
+- Electronic signatures must be an actual signature image / mark — typed names alone → fail
+- All annexures present (the BA should be complete, not partial)
+- Inspect ALL pages of this multi-page document before reporting anything as missing.
 
-═══ 7. QUALIFICATION / CERTIFICATE ═══
+═══ 7. OFFER / EMPLOYMENT LETTER ═══
 Required checks:
-- Institution name visible
-- Qualification/certificate title visible
-- Candidate name matches
-- Date of issue present
-- Is it certified (stamped as a true copy)?
-- If certified: identify the certifying authority (police station or commissioner)
-- Stamp date validity (within ${stampValidityMonths} months)
+- Company letterhead OR clear company contact details present
+- Candidate full name and surname present
+- Role / job title clearly stated
+- Salary amount stated
+- Signed by HR representative or Company Executive
+- Dated by signatory.
 
-═══ 8. DISABILITY DOCUMENT / LETTER ═══
+═══ 8. EMPLOYMENT CONTRACT / FTC ═══
 Required checks:
-- This document does NOT need to follow Capaciti structure or wording
-- It may come from YES or any other legitimate organization
-- Candidate full name and surname visible
-- Gender visible where the document provides it
-- Signature present
-- Official stamp or police / certification stamp present
-- If a police station or certifying authority is visible, extract and report it
-- Do NOT fail the document only because the format, branding, or template differs from Capaciti
+- Front cover: candidate name, surname, AND 13-digit ID number
+- All annexures present (complete contract)
+- Initialled on EVERY page (aggregate into one check "Initials on every page")
+- Page 10: candidate signature AND employer signature present
+- Page 11 (Schedule 1): all fields filled / completed
+- Page 12: signed AND dated
+- Signed and dated by BOTH employer and employee on the relevant signature pages
+- ID number matches the candidate's ID document (only if cross-reference context above is available)
+- Inspect ALL pages before deciding anything is missing.
 
-═══ OTHER DOCUMENTS ═══
-For any document that doesn't match the above types:
+═══ 9. CERTIFICATE OF COMPLETION ═══
+Required checks:
+- Certificate or letter confirms the expected programme outcomes were achieved
+- Candidate full name and surname present
+- Signed by the Programme Manager OR Executive of the Implementing Partner (IP)
+- Dated by the signatory.
+
+═══ 10. BANK LETTER (no Naspers QA — informational only) ═══
+ALL checks for this type must be prefixed "Optional - " and use status pass/warning only — NEVER fail.
+Required checks:
+- Optional - Valid South African bank: bank name should be one of ABSA, Standard Bank, FNB / First National Bank, Nedbank, Capitec, Investec, African Bank, TymeBank, Discovery Bank, Bidvest, Sasfin, Bank Zero, Access Bank. Warning if unrecognised.
+- Optional - Account number present and looks valid (numeric, 9–11 digits typical)
+- Optional - Account holder identifier matches candidate (name/surname/ID where present).
+
+═══ 11. TCX UNEMPLOYMENT AFFIDAVIT (undergoes QA) ═══
+Required checks:
+- Candidate full name as per ID — first name, second name (if any), AND surname all present and matching the ID document where cross-reference is available
+- 13-digit ID number filled in
+- All form fields completed (no blanks)
+- Question 1 circled / marked "NO"
+- Question 2 circled / marked "NO"
+- Candidate signature present
+- Date filled in by candidate
+- Certification stamp present, signed AND dated by Commissioner of Oaths / Police
+- Sworn/signed date corresponds to the certification stamp date
+- Stamp date within the last ${stampValidityMonths} months.
+
+═══ 12. CV (informational only — no QA) ═══
+ALL checks prefixed "Optional - " — never fail.
+- Optional - Document is readable
+- Optional - Candidate name/surname present
+- Optional - Contact details present (phone or email).
+
+═══ 13. CAPACITI DECLARATION (internal use only) ═══
+Required checks:
+- Signed by candidate
+- Dated by candidate.
+
+═══ 14. QUALIFICATION / MATRIC (informational — actual MIE check is external) ═══
+ALL checks prefixed "Optional - " — never fail.
+- Optional - Document is readable
+- Optional - Institution name visible
+- Optional - Qualification / Matric title visible
+- Optional - Candidate name present.
+
+═══ 15. TAX CERTIFICATE (payroll use only — no Naspers QA) ═══
+ALL checks prefixed "Optional - " — never fail.
+- Optional - Document is readable
+- Optional - Tax / IRP5 reference number present
+- Optional - Candidate name and ID present where shown.
+
+═══ OTHER ═══
+For any document that does not match the above types:
 - Check image clarity
-- Extract all readable information even if the document type is unfamiliar
-- Verify whether the candidate's full name and surname are present
-- Verify whether the candidate's ID number is present when the document contains one
-- Check for signatures where expected
-- Check for dates where expected
-- Check for stamps and certification marks only when relevant to that kind of document
-- If stamped: identify police station or commissioner
-- Extract any ID numbers present
-- If a stamp or certification would normally help but is not required for that document, raise it as a warning instead of a fail
-- Optional warning-only checks such as missing stamp or missing certification on non-required documents should be clearly labeled as optional in the check name
-- Do NOT fail a document only because it comes from a different organization or uses a different layout
+- Extract all readable information
+- Verify candidate name, surname, ID number where present
+- Check for signatures, dates, stamps where contextually expected
+- Mark non-required missing stamps/certifications as "Optional - ..." warnings
+- Do NOT fail solely because of unfamiliar layout or branding.
 
 INFORMATION EXTRACTION RULES:
-- You MUST extract ALL readable information from the document into the extracted_info object
-- Extract names, ID numbers, dates, addresses, phone numbers, emails, reference numbers — everything visible
-- Check handwritten pen marks, ticks, crosses, and filled check boxes carefully because they carry important meaning
-- Read all pages of multi-page documents before deciding whether required information is missing
-- A stamp may overlap printed words or signatures; still identify the stamp details where visible instead of treating the overlap as an automatic failure
-- For ID documents: extract full name, ID number, date of birth, gender, nationality
-- For EEA1 / employment equity forms: extract the selected race and whether the person is marked as a foreign national
-- For contracts: extract employer name, job title, signature status, dates
-- For qualifications: extract institution name, qualification title, date of issue
-- For police clearance: extract SAPS reference number, station name, issue date
-- For proof of address: extract full address, account holder name, date, and accept non-Capaciti layouts from utilities, landlords, banks, or other organizations
-- For disability documents: extract the organization name, candidate full name, gender if shown, stamp details, and signature status
-- Leave fields empty string if not found — do not make up information
-
-PROOF OF ADDRESS RULES:
-- A proof of address document does NOT need to follow Capaciti structure or wording
-- Accept common proofs of address from different organizations as long as the address is readable
-- Prefer candidate name, account holder name, surname, issuer, reference number, and date when available
-- Do NOT fail a proof of address only because the template or layout differs from Capaciti
+- You MUST extract ALL readable information into extracted_info
+- Extract names, ID numbers, dates, addresses, phone numbers, emails, reference numbers
+- Read handwritten ticks, crosses, circles, and check boxes carefully — they carry critical answers (e.g. TCX Q1/Q2, EEA1 race/disability/foreign-national)
+- Read ALL pages of multi-page documents before deciding required information is missing
+- Stamps may overlap printed text — still extract stamp details where visible
+- Leave fields as empty string if not found — never invent information.
 
 STAMP DATE VALIDITY:
-- When a stamp date is found, calculate whether it is within ${stampValidityMonths} months from today (${today})
-- Set stamp_date_valid to true if within period, false if expired
-- If stamp is expired, add this as a FAIL check and include in issues
+- For Certified ID: the stamp date must be within the current programme YEAR (${today.substring(0, 4)}).
+- For all other documents that require a stamp: the stamp date must be within ${stampValidityMonths} months from today (${today}).
+- Set stamp_date_valid accordingly. If expired, add a FAIL check and include in issues.
 
 VALIDATION OUTPUT RULES:
 - For each check performed, include it in the "checks" array with name, status (pass/warning/fail), and detail
-- Prefix warning-only non-scoring checks with "Optional -", especially for missing stamp/certification findings on documents where those are not mandatory
-- Overall status: "fail" if ANY critical check fails, "warning" if non-critical issues exist, "pass" if all checks pass
-- Provide a plain-English explanation of findings
+- Prefix warning-only / no-QA / non-scoring checks with "Optional - "
+- Overall status: "fail" if ANY required check fails, "warning" if only non-critical issues exist, "pass" if all required checks pass
+- Provide a plain-English summary
 - Be specific about what failed and why
 - ALWAYS extract and report: stamp_date, police_station, certification_authority when visible
-- If analysing from filename only (no image content), note that visual checks are pending and set appropriate confidence`;
+- ALWAYS include the "File naming convention" check for every document.`;
 }
 
 function isPdfFile(fileName: string): boolean {
