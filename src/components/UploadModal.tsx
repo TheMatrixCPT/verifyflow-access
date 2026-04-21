@@ -132,13 +132,13 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId, replacement
     setFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const buildInstructions = (filesToProcess: File[], replaceExisting: boolean): UploadFileInstruction[] => {
+  const buildInstructions = (filesToProcess: FileWithPath[], replaceExisting: boolean): UploadFileInstruction[] => {
     if (replacementTarget) {
-      const firstFile = filesToProcess[0];
-      if (!firstFile) return [];
+      const first = filesToProcess[0];
+      if (!first) return [];
 
       return [{
-        file: firstFile,
+        file: first.file,
         targetCandidateId: replacementTarget.candidateId,
         replacementDocumentId: replacementTarget.documentId,
         inferredDocumentType: replacementTarget.documentType,
@@ -146,14 +146,17 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId, replacement
       }];
     }
 
-    return filesToProcess.map((file) => {
-      const conflict = uploadConflicts.find((item) => item.fileName === file.name);
+    return filesToProcess.map((entry) => {
+      const conflict = uploadConflicts.find((item) => item.fileName === entry.file.name);
+      // Folder hint biases grouping when AI extraction is ambiguous; conflict
+      // match (an existing candidate already in the session) always wins.
+      const matchedCandidateName = conflict?.candidateName || entry.folderHint || undefined;
       return {
-        file,
+        file: entry.file,
         targetCandidateId: conflict?.candidateId,
         replacementDocumentId: replaceExisting ? conflict?.existingDocumentId : undefined,
         inferredDocumentType: conflict?.inferredDocumentType,
-        matchedCandidateName: conflict?.candidateName,
+        matchedCandidateName,
       };
     });
   };
