@@ -23,13 +23,24 @@ const toolSchema = {
         document_type: {
           type: "string",
           enum: [
-            "ID Document", "Signed Contract", "EEA1 Form", "Affidavit",
-            "Attendance Register", "Qualification", "Proof of Address",
-            "Tax Certificate", "Police Clearance", "CV/Resume",
-            "Reference Letter", "Medical Certificate", "Disability Document", "Bank Statement",
-            "Employment Contract", "Other"
+            "Certified ID",
+            "Unemployment Affidavit",
+            "EEA1 Form",
+            "PWDS Confirmation of Disability",
+            "Social Media Consent",
+            "Beneficiary Agreement",
+            "Offer Letter",
+            "Employment Contract FTC",
+            "Certificate of Completion",
+            "Bank Letter",
+            "TCX Unemployment Affidavit",
+            "CV",
+            "Capaciti Declaration",
+            "Qualification Matric",
+            "Tax Certificate",
+            "Other"
           ],
-          description: "The type of HR document"
+          description: "The type of Capaciti HR document. Pick the single best match."
         },
         candidate_name: { type: "string", description: "Person's full name or 'Unknown'" },
         confidence: { type: "number", description: "Confidence score 0-100" },
