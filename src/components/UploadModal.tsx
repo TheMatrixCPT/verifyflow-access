@@ -501,7 +501,7 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId, replacement
                         <FolderOpen className="h-4 w-4" />
                         Choose Folder
                       </Button>
-                    ) : folderUploadSupport.method === "FileSystemAccessAPI" ? (
+                    ) : folderUploadSupport.supportsPicker ? (
                       <Button
                         type="button"
                         variant="secondary"
@@ -525,8 +525,8 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId, replacement
                     )}
                   </div>
                 )}
-                {!replacementTarget && folderUploadSupport.method === "none" && (
-                  <p className="text-xs text-amber-600 mt-2">
+                {!replacementTarget && !folderUploadSupport.supportsFileInput && !folderUploadSupport.supportsPicker && (
+                  <p className="text-xs text-warning mt-2">
                     ℹ️ Folder upload is not supported in your browser. Use Chrome, Edge, or Opera for folder uploads, or select files individually.
                   </p>
                 )}
