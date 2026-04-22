@@ -597,6 +597,15 @@ serve(async (req) => {
       }
       const errText = await aiResponse.text();
       console.error(`OpenRouter AI error (model: ${aiModel}):`, status, errText);
+      if (status === 400) {
+        return new Response(JSON.stringify({
+          error: "ai_bad_request",
+          message: "The AI service could not process this file. It may be an unsupported format, too large, or corrupted. Please re-upload a clear PDF or image.",
+          details: errText.slice(0, 500),
+        }), {
+          status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      }
       throw new Error(`OpenRouter AI error: ${status}`);
     }
 

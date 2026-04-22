@@ -63,7 +63,7 @@ const InfoRow = ({ icon: Icon, label, value }: { icon: React.ElementType; label:
 const DocumentSection = ({ doc, onReplaceDocument, candidateName }: { doc: DocumentData; onReplaceDocument?: (doc: DocumentData) => void; candidateName?: string }) => {
   const [expanded, setExpanded] = useState(false);
   const [viewingDoc, setViewingDoc] = useState(false);
-  const docCfg = docStatusIcon[doc.status];
+  const docCfg = docStatusIcon[doc.status as keyof typeof docStatusIcon] || docStatusIcon.warning;
   const DocIcon = docCfg.icon;
 
   const handleViewDocument = async (filePath: string) => {
@@ -216,7 +216,10 @@ const DocumentSection = ({ doc, onReplaceDocument, candidateName }: { doc: Docum
           <span className="text-sm font-semibold text-foreground truncate">{doc.type}</span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <span className={statusConfig[doc.status].badge}>{statusConfig[doc.status].label}</span>
+          {(() => {
+            const sc = statusConfig[doc.status as keyof typeof statusConfig] || statusConfig.warning;
+            return <span className={sc.badge}>{sc.label}</span>;
+          })()}
           {doc.status === "fail" && onReplaceDocument && (
             <button
               className="text-xs font-medium text-destructive hover:text-destructive/80 underline flex items-center gap-0.5"
@@ -382,7 +385,7 @@ interface CandidateModalProps {
 const CandidateModal = ({ candidate, open, onClose, onReplaceDocument }: CandidateModalProps) => {
   if (!candidate) return null;
 
-  const cfg = statusConfig[candidate.status];
+  const cfg = statusConfig[candidate.status as keyof typeof statusConfig] || statusConfig.warning;
   const secondaryLabel = candidate.primaryDocumentLabel || "Document Type: Unknown";
 
   return (
