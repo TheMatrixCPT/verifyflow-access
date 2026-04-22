@@ -18,6 +18,25 @@ import type { DocumentData, CandidateData } from "@/components/CandidateCard";
 
 type FilterType = "all" | "pass" | "fail";
 
+function getDocumentsForFilter(documents: DocumentData[], filter: FilterType): DocumentData[] {
+  if (filter === "all") return documents;
+  return documents.filter((document) => document.status === filter);
+}
+
+function buildDocumentTypeLabel(documents: DocumentData[]): string {
+  const uniqueDocumentTypes = Array.from(
+    new Set(
+      documents
+        .map((doc) => doc.type?.trim())
+        .filter((type): type is string => Boolean(type && type.length > 0 && type !== "Unknown"))
+    )
+  );
+
+  return uniqueDocumentTypes.length > 0
+    ? `Document Types: ${uniqueDocumentTypes.join(", ")}`
+    : "Document Type: Unknown";
+}
+
 const SessionDetail = () => {
   const { id } = useParams<{ id: string }>();
   const [searchQuery, setSearchQuery] = useState("");
@@ -76,22 +95,11 @@ const SessionDetail = () => {
     // Calculate score dynamically from checks: passed / total * 100
     const allChecks = docData.flatMap((d) => d.checks || []);
     const dynamicScore = allChecks.length > 0 ? calculateValidationScore(allChecks) : (c.score || 0);
-    const uniqueDocumentTypes = Array.from(
-      new Set(
-        docData
-          .map((doc) => doc.type?.trim())
-          .filter((type): type is string => Boolean(type && type.length > 0 && type !== "Unknown"))
-      )
-    );
-    const documentTypeLabel = uniqueDocumentTypes.length > 0
-      ? `Document Types: ${uniqueDocumentTypes.join(", ")}`
-      : "Document Type: Unknown";
-
     return {
       id: c.id,
       name: c.name,
       idNumber: c.id_number || "N/A",
-      primaryDocumentLabel: documentTypeLabel,
+      primaryDocumentLabel: buildDocumentTypeLabel(docData),
       score: dynamicScore,
       status: (c.status as "pass" | "warning" | "fail") || "pass",
       documents: docData,
@@ -100,11 +108,32 @@ const SessionDetail = () => {
     };
   }), [candidates, documents]);
 
-  const filtered = candidatesWithDocs.filter((c) => {
-    const matchesSearch = c.name.toLowerCase().includes(searchQuery.toLowerCase()) || c.idNumber.includes(searchQuery);
-    const matchesFilter = filter === "all" || c.status === filter;
-    return matchesSearch && matchesFilter;
-  });
+  const filtered = useMemo(() => candidatesWithDocs
+    .map((candidate) => {
+      const visibleDocuments = getDocumentsForFilter(candidate.documents, filter);
+
+      if (visibleDocuments.length === 0) return null;
+
+      const visibleChecks = visibleDocuments.flatMap((document) => document.checks || []);
+      const visibleIssues = visibleDocuments.flatMap((document) => document.issues || []).filter(Boolean);
+      const hasFailure = visibleDocuments.some((document) => document.status === "fail");
+      const hasWarning = visibleDocuments.some((document) => document.status === "warning");
+      const visibleStatus = hasFailure ? "fail" : hasWarning ? "warning" : "pass";
+
+      return {
+        ...candidate,
+        documents: visibleDocuments,
+        primaryDocumentLabel: buildDocumentTypeLabel(visibleDocuments),
+        score: visibleChecks.length > 0 ? calculateValidationScore(visibleChecks) : candidate.score,
+        status: visibleStatus,
+        issues: visibleIssues,
+      } satisfies CandidateData;
+    })
+    .filter((candidate): candidate is CandidateData => Boolean(candidate))
+    .filter((candidate) => {
+      const query = searchQuery.toLowerCase();
+      return candidate.name.toLowerCase().includes(query) || candidate.idNumber.includes(searchQuery);
+    }), [candidatesWithDocs, filter, searchQuery]);
 
   const sessionChecks = documents.flatMap((d) => ((d.validation_details as any)?.checks || []));
   const stats = {
