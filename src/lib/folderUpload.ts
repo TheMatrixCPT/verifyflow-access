@@ -9,6 +9,29 @@ export interface FileWithPath {
 const ALLOWED_EXTENSIONS = [".pdf", ".png", ".jpg", ".jpeg", ".webp", ".docx"];
 const HIDDEN_OR_JUNK = /(^\.|^Thumbs\.db$|^desktop\.ini$)/i;
 
+// Check for browser folder upload capabilities
+export function getFolderUploadSupport(): { supportsDragDrop: boolean; supportsFileInput: boolean; method: string } {
+  // Check for File System Access API (modern approach, supported in Chrome, Edge, Opera)
+  const hasFileSystemAccessAPI = "showDirectoryPicker" in window;
+
+  // Check for webkitGetAsEntry (Chromium-specific, deprecated but still works)
+  // Must check if it's a function on the DataTransferItem prototype
+  let hasWebkitEntry = false;
+  if (typeof DataTransferItem !== "undefined" && DataTransferItem.prototype) {
+    hasWebkitEntry = typeof (DataTransferItem.prototype as unknown as { webkitGetAsEntry?: () => unknown }).webkitGetAsEntry === "function";
+  }
+
+  // Check for webkitdirectory support in input
+  const testInput = document.createElement("input");
+  const hasWebkitDirectory = "webkitdirectory" in testInput || "directory" in testInput;
+
+  return {
+    supportsDragDrop: hasFileSystemAccessAPI || hasWebkitEntry,
+    supportsFileInput: hasWebkitDirectory,
+    method: hasFileSystemAccessAPI ? "FileSystemAccessAPI" : hasWebkitEntry ? "webkitGetAsEntry" : "none"
+  };
+}
+
 export function isAllowedFile(name: string): boolean {
   if (HIDDEN_OR_JUNK.test(name)) return false;
   const lower = name.toLowerCase();
@@ -95,4 +118,47 @@ export function fallbackFromPlainFiles(files: File[]): FileWithPath[] {
   return files
     .filter((f) => isAllowedFile(f.name))
     .map((f) => makeEntry(f, f.name));
+}
+
+// File System Access API handler for modern browsers (Chrome, Edge, Opera)
+async function collectFilesFromFileSystemAccessAPI(directoryHandle: FileSystemDirectoryHandle): Promise<FileWithPath[]> {
+  const results: FileWithPath[] = [];
+
+  async function processHandle(handle: FileSystemHandle, pathPrefix: string): Promise<void> {
+    if (handle.kind === "file") {
+      const file = await (handle as FileSystemFileHandle).getFile();
+      if (!isAllowedFile(file.name)) return;
+      const relativePath = pathPrefix + file.name;
+      results.push(makeEntry(file, relativePath));
+    } else if (handle.kind === "directory") {
+      const dirHandle = handle as FileSystemDirectoryHandle;
+      const entries = dirHandle.values();
+      for await (const entry of entries) {
+        await processHandle(entry, pathPrefix + dirHandle.name + "/");
+      }
+    }
+  }
+
+  await processHandle(directoryHandle, "");
+  return results;
+}
+
+// Open folder picker using File System Access API
+export async function openFolderPicker(): Promise<FileWithPath[] | null> {
+  try {
+    // Check if File System Access API is available
+    if (!("showDirectoryPicker" in window)) {
+      console.warn("File System Access API not supported in this browser");
+      return null;
+    }
+
+    const handle = await (window as unknown as { showDirectoryPicker: () => Promise<FileSystemDirectoryHandle> }).showDirectoryPicker();
+    return await collectFilesFromFileSystemAccessAPI(handle);
+  } catch (error) {
+    // User cancelled or error occurred
+    if ((error as Error).name !== "AbortError") {
+      console.error("Error opening folder picker:", error);
+    }
+    return null;
+  }
 }

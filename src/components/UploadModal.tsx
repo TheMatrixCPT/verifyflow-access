@@ -15,6 +15,8 @@ import {
   collectFilesFromInput,
   fallbackFromPlainFiles,
   isAllowedFile,
+  getFolderUploadSupport,
+  openFolderPicker,
   type FileWithPath,
 } from "@/lib/folderUpload";
 import { toast } from "sonner";
@@ -70,6 +72,12 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId, replacement
   const [showCrossCohortDialog, setShowCrossCohortDialog] = useState(false);
   const [pendingReplaceFlag, setPendingReplaceFlag] = useState(false);
   const folderInputRef = useRef<HTMLInputElement>(null);
+  const [folderUploadSupport, setFolderUploadSupport] = useState<{ supportsDragDrop: boolean; supportsFileInput: boolean; method: string }>({ supportsDragDrop: false, supportsFileInput: false, method: "none" });
+
+  // Check folder upload support on mount
+  useEffect(() => {
+    setFolderUploadSupport(getFolderUploadSupport());
+  }, []);
 
   useEffect(() => {
     if (replacementTarget) {
@@ -101,13 +109,32 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId, replacement
     const items = e.dataTransfer.items;
     let collected: FileWithPath[] = [];
     let originalCount = 0;
-    if (items && items.length && (items[0] as unknown as { webkitGetAsEntry?: () => unknown }).webkitGetAsEntry) {
-      collected = await collectFilesFromDataTransfer(items);
-      originalCount = e.dataTransfer.files.length || collected.length;
+    
+    // Check if webkitGetAsEntry is available on DataTransferItem
+    const support = getFolderUploadSupport();
+    
+    if (support.supportsDragDrop && items && items.length > 0) {
+      // Try to use webkitGetAsEntry for folder drag-drop
+      try {
+        collected = await collectFilesFromDataTransfer(items);
+        originalCount = e.dataTransfer.files.length || collected.length;
+      } catch (err) {
+        console.error("Error collecting files from data transfer:", err);
+        // Fall back to plain files
+        const dropped = Array.from(e.dataTransfer.files);
+        originalCount = dropped.length;
+        collected = fallbackFromPlainFiles(dropped);
+      }
     } else {
+      // Fallback: use plain files (works for individual files, not folders)
       const dropped = Array.from(e.dataTransfer.files);
       originalCount = dropped.length;
       collected = fallbackFromPlainFiles(dropped);
+      
+      // If user dropped a folder but we only got files, warn them
+      if (support.method === "none" && originalCount > 0) {
+        toast.info("Folder drag & drop is not supported in this browser. Please use the 'Choose Folder' button or select individual files.");
+      }
     }
     addFiles(replacementTarget ? collected.slice(0, 1) : collected, originalCount);
   }, [replacementTarget]);
@@ -126,6 +153,17 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId, replacement
     const collected = collectFilesFromInput(e.target.files);
     addFiles(collected, original);
     e.target.value = "";
+  };
+
+  // Handle folder selection using File System Access API (for browsers that support it)
+  const handleFolderPicker = async () => {
+    const collected = await openFolderPicker();
+    if (collected && collected.length > 0) {
+      addFiles(collected, collected.length);
+    } else if (collected === null && folderUploadSupport.method === "none") {
+      // File System Access API not supported, show helpful message
+      toast.info("Folder upload is not supported in this browser. Please use Chrome, Edge, or Opera for folder uploads, or select files individually.");
+    }
   };
 
   const removeFile = (index: number) => {
@@ -448,16 +486,44 @@ const UploadModal = ({ open, onClose, onComplete, existingSessionId, replacement
                       <FileText className="h-4 w-4" />
                       Choose Files
                     </Button>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => folderInputRef.current?.click()}
-                    >
-                      <FolderOpen className="h-4 w-4" />
-                      Choose Folder
-                    </Button>
+                    {folderUploadSupport.supportsFileInput ? (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => folderInputRef.current?.click()}
+                      >
+                        <FolderOpen className="h-4 w-4" />
+                        Choose Folder
+                      </Button>
+                    ) : folderUploadSupport.method === "FileSystemAccessAPI" ? (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={handleFolderPicker}
+                      >
+                        <FolderOpen className="h-4 w-4" />
+                        Choose Folder
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => toast.info("Folder upload is not supported in this browser. Please use Chrome, Edge, or Opera, or select files individually.")}
+                        disabled
+                      >
+                        <FolderOpen className="h-4 w-4" />
+                        Choose Folder
+                      </Button>
+                    )}
                   </div>
+                )}
+                {!replacementTarget && folderUploadSupport.method === "none" && (
+                  <p className="text-xs text-amber-600 mt-2">
+                    ℹ️ Folder upload is not supported in your browser. Use Chrome, Edge, or Opera for folder uploads, or select files individually.
+                  </p>
                 )}
                 <input
                   id="file-input"
