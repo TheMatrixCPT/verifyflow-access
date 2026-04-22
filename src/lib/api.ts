@@ -51,6 +51,116 @@ function toDisplayName(rawName: string): string {
   return rawName.replace(/\b\w/g, (c) => c.toUpperCase()).replace(/\s+/g, " ").trim();
 }
 
+function isUnknownName(name: string | null | undefined): boolean {
+  if (!name) return true;
+
+  const normalized = name.trim().toLowerCase();
+  return normalized.length === 0 || normalized === "unknown" || normalized === "n/a";
+}
+
+function getNameParts(name: string | null | undefined) {
+  const cleaned = (name || "")
+    .toLowerCase()
+    .replace(/[^a-z\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+
+  return {
+    raw: (name || "").trim(),
+    normalized: [...cleaned].sort().join(" "),
+    ordered: cleaned,
+    first: cleaned[0] || "",
+    last: cleaned[cleaned.length - 1] || "",
+  };
+}
+
+function normalizeIdNumber(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const cleaned = value.replace(/\D/g, "");
+  return cleaned.length === 13 ? cleaned : null;
+}
+
+function extractFileNameTokens(fileName: string): string[] {
+  return fileName
+    .replace(/\.[^.]+$/, "")
+    .toLowerCase()
+    .replace(/[^a-z\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function namesReferToSameCandidate(leftName: string, rightName: string): boolean {
+  if (isUnknownName(leftName) || isUnknownName(rightName)) return false;
+
+  const left = getNameParts(leftName);
+  const right = getNameParts(rightName);
+
+  if (!left.ordered.length || !right.ordered.length) return false;
+  if (left.normalized === right.normalized) return true;
+
+  if (left.first && right.first && left.last && right.last) {
+    return left.first === right.first && left.last === right.last;
+  }
+
+  if (left.ordered.length === 1 && right.ordered.length === 1) {
+    return left.first === right.first;
+  }
+
+  return false;
+}
+
+function fileNameMatchesCandidate(fileName: string, candidateNames: string[]): boolean {
+  const tokens = extractFileNameTokens(fileName);
+  if (tokens.length === 0) return false;
+
+  return candidateNames.some((candidateName) => {
+    if (isUnknownName(candidateName)) return false;
+
+    const parts = getNameParts(candidateName);
+    if (!parts.ordered.length) return false;
+
+    if (parts.first && parts.last && parts.first !== parts.last) {
+      return tokens.includes(parts.first) && tokens.includes(parts.last);
+    }
+
+    return parts.ordered.every((part) => tokens.includes(part));
+  });
+}
+
+function getDocumentExtractedInfo(document: any): Record<string, any> | null {
+  const details = document.validation_details as any;
+  const info = details?.extracted_info;
+  return info && typeof info === "object" ? info : null;
+}
+
+function getDocumentNameCandidates(document: any): string[] {
+  const extractedInfo = getDocumentExtractedInfo(document);
+  const names = [
+    document.candidate_name_extracted,
+    extractedInfo?.full_name,
+  ];
+
+  return [...new Set(
+    names
+      .filter((value): value is string => typeof value === "string" && !isUnknownName(value))
+      .map((value) => toDisplayName(value)),
+  )];
+}
+
+function getPreferredCandidateName(candidateNames: string[]): string {
+  const validNames = candidateNames.filter((name) => !isUnknownName(name));
+  if (validNames.length === 0) return "Unknown";
+
+  return [...validNames].sort((left, right) => {
+    const leftParts = getNameParts(left).ordered.length;
+    const rightParts = getNameParts(right).ordered.length;
+
+    if (rightParts !== leftParts) return rightParts - leftParts;
+    if (right.length !== left.length) return right.length - left.length;
+    return left.localeCompare(right);
+  })[0];
+}
+
 function inferDocumentTypeFromFileName(fileName: string): string | undefined {
   const withoutExt = fileName.replace(/\.[^.]+$/, "");
   for (const documentType of DOCUMENT_TYPE_PATTERNS) {
@@ -96,7 +206,7 @@ function getChecksForDocument(document: any) {
 
 function getExtractedIdNumber(document: any): string | null {
   const details = document.validation_details as any;
-  return details?.extracted_id_number || details?.extracted_info?.id_number || null;
+  return normalizeIdNumber(details?.extracted_id_number || details?.extracted_info?.id_number || null);
 }
 
 async function syncSessionCandidates(sessionId: string) {
@@ -116,20 +226,98 @@ async function syncSessionCandidates(sessionId: string) {
 
   if (candidatesError) throw candidatesError;
 
-  const candidateMap = new Map<string, typeof docs>();
-  const normalizedToOriginal = new Map<string, string>();
+  type CandidateGroup = {
+    names: Set<string>;
+    ids: Set<string>;
+    candidateIds: Set<string>;
+    docs: typeof docs;
+  };
 
-  for (const doc of docs) {
-    const rawName = doc.candidate_name_extracted || "Unknown";
-    const normalized = normalizeName(rawName);
+  const groups: CandidateGroup[] = [];
+  const unassignedDocs: typeof docs = [];
 
-    if (!normalizedToOriginal.has(normalized)) {
-      normalizedToOriginal.set(normalized, toDisplayName(rawName));
+  const findMatchingGroup = (document: any): CandidateGroup | undefined => {
+    const candidateId = document.candidate_id || null;
+    const extractedId = getExtractedIdNumber(document);
+    const nameCandidates = getDocumentNameCandidates(document);
+
+    return groups.find((group) => {
+      if (candidateId && group.candidateIds.has(candidateId)) return true;
+      if (extractedId && group.ids.has(extractedId)) return true;
+
+      const groupNames = [...group.names];
+      if (nameCandidates.some((candidateName) => groupNames.some((groupName) => namesReferToSameCandidate(candidateName, groupName)))) {
+        return true;
+      }
+
+      return fileNameMatchesCandidate(document.file_name, groupNames);
+    });
+  };
+
+  const addDocumentToGroup = (group: CandidateGroup, document: any) => {
+    group.docs.push(document);
+
+    for (const name of getDocumentNameCandidates(document)) {
+      group.names.add(name);
     }
 
-    const displayName = normalizedToOriginal.get(normalized)!;
-    if (!candidateMap.has(displayName)) candidateMap.set(displayName, []);
-    candidateMap.get(displayName)!.push(doc);
+    const extractedId = getExtractedIdNumber(document);
+    if (extractedId) {
+      group.ids.add(extractedId);
+    }
+
+    if (document.candidate_id) {
+      group.candidateIds.add(document.candidate_id);
+    }
+  };
+
+  for (const doc of docs) {
+    const matchingGroup = findMatchingGroup(doc);
+
+    if (matchingGroup) {
+      addDocumentToGroup(matchingGroup, doc);
+      continue;
+    }
+
+    const nameCandidates = getDocumentNameCandidates(doc);
+    const extractedId = getExtractedIdNumber(doc);
+
+    if (nameCandidates.length === 0 && !extractedId && !doc.candidate_id) {
+      unassignedDocs.push(doc);
+      continue;
+    }
+
+    const newGroup: CandidateGroup = {
+      names: new Set(nameCandidates),
+      ids: new Set(extractedId ? [extractedId] : []),
+      candidateIds: new Set(doc.candidate_id ? [doc.candidate_id] : []),
+      docs: [],
+    };
+
+    addDocumentToGroup(newGroup, doc);
+    groups.push(newGroup);
+  }
+
+  for (const doc of unassignedDocs) {
+    const matchingGroup = findMatchingGroup(doc);
+
+    if (matchingGroup) {
+      addDocumentToGroup(matchingGroup, doc);
+      continue;
+    }
+
+    const unknownGroup = groups.find((group) => getPreferredCandidateName([...group.names]) === "Unknown");
+    if (unknownGroup) {
+      addDocumentToGroup(unknownGroup, doc);
+      continue;
+    }
+
+    groups.push({
+      names: new Set(),
+      ids: new Set(),
+      candidateIds: new Set(),
+      docs: [doc],
+    });
   }
 
   const existingCandidateMap = new Map(
@@ -137,7 +325,9 @@ async function syncSessionCandidates(sessionId: string) {
   );
   const syncedCandidateIds = new Set<string>();
 
-  for (const [name, candidateDocs] of candidateMap) {
+  for (const group of groups) {
+    const candidateDocs = group.docs;
+    const name = getPreferredCandidateName([...group.names]);
     const allChecks = candidateDocs.flatMap((document) => getChecksForDocument(document));
     const score = allChecks.length > 0 ? calculateValidationScore(allChecks) : 0;
     const hasFailure = candidateDocs.some((document) => document.validation_status === "fail");

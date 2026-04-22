@@ -32,6 +32,7 @@ const toolSchema = {
             "Offer Letter",
             "Employment Contract FTC",
             "Certificate of Completion",
+            "MIE Verification",
             "Bank Letter",
             "TCX Unemployment Affidavit",
             "CV",
@@ -246,7 +247,7 @@ Required checks:
 
 ═══ 9. CERTIFICATE OF COMPLETION ═══
 Required checks:
-- Certificate or letter confirms the expected programme outcomes were achieved
+- Certificate or letter confirms a course, training programme, learnership, or the expected programme outcomes were achieved
 - Candidate full name and surname present
 - Signed by the Programme Manager OR Executive of the Implementing Partner (IP)
 - Dated by the signatory.
@@ -303,6 +304,7 @@ For any document that does not match the above types:
 - Check for signatures, dates, stamps where contextually expected
 - Mark non-required missing stamps/certifications as "Optional - ..." warnings
 - Do NOT fail solely because of unfamiliar layout or branding.
+- If the filename or readable contents clearly indicate a known supporting document such as MIE verification, course or training completion, qualification evidence, CV, bank letter, or tax certificate, choose that specific document_type instead of "Other".
 
 INFORMATION EXTRACTION RULES:
 - You MUST extract ALL readable information into extracted_info
@@ -400,7 +402,7 @@ async function buildUserContent(fileUrl: string, fileName: string, crossReferenc
   const crossReferencePrompt = crossReferenceContext.available
     ? `Cross-reference context is available. Candidate name: "${crossReferenceContext.candidateName || "Unknown"}". Candidate ID number from uploaded ID document: "${crossReferenceContext.idNumber || "Unknown"}". Use that uploaded ID information only for document types that require ID matching.`
     : `Cross-reference context is not available. Do not perform candidate ID cross-reference checks, and do not raise a fail or warning just because no ID document was uploaded with this candidate's documents.`;
-  const textPrompt = `Analyze this document and validate it thoroughly. Filename: "${fileName}". ${crossReferencePrompt} Check all pages before deciding anything is missing. Do not stop at the first pages of a multi-page document. Read pen marks, ticks, handwritten selections, and check boxes carefully because they contain important answers. Remember to extract stamp dates, police station names, and certification authority details even when stamps overlap words. For employment equity forms, treat the nationality answer as Yes or No: No means South African, Yes means foreign national. If foreign national is marked yes, extract the acquired date of nationality, residence date, or permit-related date into extracted_info.foreign_national_support_date. For contracts, page 10 employee details is an information page and does not require employee or employer signatures. Some contracts require only the employee signature while others require both employee and employer signatures, so decide from the actual signature blocks and wording on the relevant signature page. For disability and proof-of-address documents, do not require Capaciti formatting if the core identifying information and stamps/signatures are present. For unfamiliar documents, still extract all readable information and verify candidate name, surname, and ID number where present. Mark non-required missing stamp or certification findings as warning checks prefixed with "Optional -". Respond using the extract_document_info function. Be thorough in your validation checks.`;
+  const textPrompt = `Analyze this document and validate it thoroughly. Filename: "${fileName}". ${crossReferencePrompt} Check all pages before deciding anything is missing. Do not stop at the first pages of a multi-page document. Read pen marks, ticks, handwritten selections, and check boxes carefully because they contain important answers. Remember to extract stamp dates, police station names, and certification authority details even when stamps overlap words. For employment equity forms, treat the nationality answer as Yes or No: No means South African, Yes means foreign national. If foreign national is marked yes, extract the acquired date of nationality, residence date, or permit-related date into extracted_info.foreign_national_support_date. For contracts, page 10 employee details is an information page and does not require employee or employer signatures. Some contracts require only the employee signature while others require both employee and employer signatures, so decide from the actual signature blocks and wording on the relevant signature page. For disability and proof-of-address documents, do not require Capaciti formatting if the core identifying information and stamps/signatures are present. If the filename or readable contents clearly indicate MIE verification, a course or training completion certificate, or another listed supporting document type, classify it using that specific document_type instead of "Other". For unfamiliar documents, still extract all readable information and verify candidate name, surname, and ID number where present. Mark non-required missing stamp or certification findings as warning checks prefixed with "Optional -". Respond using the extract_document_info function. Be thorough in your validation checks.`;
   
   try {
     const base64 = await fetchFileAsBase64(fileUrl);
