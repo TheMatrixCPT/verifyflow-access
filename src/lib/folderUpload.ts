@@ -3,32 +3,44 @@
 export interface FileWithPath {
   file: File;
   relativePath: string; // e.g. "JohnDoe/BA.pdf" or just "BA.pdf"
-  folderHint: string | null; // first path segment if nested, else null
+  folderHint: string | null; // immediate parent folder if nested, else null
 }
 
 const ALLOWED_EXTENSIONS = [".pdf", ".png", ".jpg", ".jpeg", ".webp", ".docx"];
 const HIDDEN_OR_JUNK = /(^\.|^Thumbs\.db$|^desktop\.ini$)/i;
 
-// Check for browser folder upload capabilities
-export function getFolderUploadSupport(): { supportsDragDrop: boolean; supportsFileInput: boolean; method: string } {
-  // Check for File System Access API (modern approach, supported in Chrome, Edge, Opera)
-  const hasFileSystemAccessAPI = "showDirectoryPicker" in window;
+type FolderUploadSupport = {
+  supportsDragDrop: boolean;
+  supportsFileInput: boolean;
+  supportsPicker: boolean;
+  dragDropMethod: "filesystem-handle" | "webkitGetAsEntry" | "none";
+};
 
-  // Check for webkitGetAsEntry (Chromium-specific, deprecated but still works)
-  // Must check if it's a function on the DataTransferItem prototype
+type DataTransferItemWithHandles = DataTransferItem & {
+  getAsFileSystemHandle?: () => Promise<FileSystemHandle | null>;
+  webkitGetAsEntry?: () => any;
+};
+
+// Check for browser folder upload capabilities
+export function getFolderUploadSupport(): FolderUploadSupport {
+  const hasFileSystemAccessAPI = "showDirectoryPicker" in window;
+  const hasFileSystemHandle = typeof DataTransferItem !== "undefined" && DataTransferItem.prototype
+    ? typeof (DataTransferItem.prototype as DataTransferItemWithHandles).getAsFileSystemHandle === "function"
+    : false;
+
   let hasWebkitEntry = false;
   if (typeof DataTransferItem !== "undefined" && DataTransferItem.prototype) {
-    hasWebkitEntry = typeof (DataTransferItem.prototype as unknown as { webkitGetAsEntry?: () => unknown }).webkitGetAsEntry === "function";
+    hasWebkitEntry = typeof (DataTransferItem.prototype as DataTransferItemWithHandles).webkitGetAsEntry === "function";
   }
 
-  // Check for webkitdirectory support in input
   const testInput = document.createElement("input");
   const hasWebkitDirectory = "webkitdirectory" in testInput || "directory" in testInput;
 
   return {
-    supportsDragDrop: hasFileSystemAccessAPI || hasWebkitEntry,
+    supportsDragDrop: hasFileSystemHandle || hasWebkitEntry,
     supportsFileInput: hasWebkitDirectory,
-    method: hasFileSystemAccessAPI ? "FileSystemAccessAPI" : hasWebkitEntry ? "webkitGetAsEntry" : "none"
+    supportsPicker: hasFileSystemAccessAPI,
+    dragDropMethod: hasFileSystemHandle ? "filesystem-handle" : hasWebkitEntry ? "webkitGetAsEntry" : "none",
   };
 }
 
@@ -68,6 +80,21 @@ async function readAllEntries(reader: any): Promise<any[]> {
   return all;
 }
 
+async function walkFileSystemHandle(handle: FileSystemHandle, pathPrefix: string): Promise<FileWithPath[]> {
+  if (handle.kind === "file") {
+    const file = await (handle as FileSystemFileHandle).getFile();
+    if (!isAllowedFile(file.name)) return [];
+    return [makeEntry(file, pathPrefix + file.name)];
+  }
+
+  const directoryHandle = handle as FileSystemDirectoryHandle;
+  const nested: FileWithPath[] = [];
+  for await (const entry of directoryHandle.values()) {
+    nested.push(...await walkFileSystemHandle(entry, pathPrefix + directoryHandle.name + "/"));
+  }
+  return nested;
+}
+
 async function walkEntry(entry: any, pathPrefix: string): Promise<FileWithPath[]> {
   if (entry.isFile) {
     const file: File = await new Promise((resolve, reject) =>
@@ -90,16 +117,25 @@ async function walkEntry(entry: any, pathPrefix: string): Promise<FileWithPath[]
 export async function collectFilesFromDataTransfer(
   items: DataTransferItemList,
 ): Promise<FileWithPath[]> {
-  const entries: any[] = [];
+  const collected: FileWithPath[] = [];
   for (let i = 0; i < items.length; i++) {
-    const item = items[i];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const entry = (item as any).webkitGetAsEntry?.();
-    if (entry) entries.push(entry);
+    const item = items[i] as DataTransferItemWithHandles;
+    if (item.kind !== "file") continue;
+
+    if (typeof item.getAsFileSystemHandle === "function") {
+      const handle = await item.getAsFileSystemHandle();
+      if (handle) {
+        collected.push(...await walkFileSystemHandle(handle, ""));
+        continue;
+      }
+    }
+
+    const entry = item.webkitGetAsEntry?.();
+    if (entry) {
+      collected.push(...await walkEntry(entry, ""));
+    }
   }
-  if (!entries.length) return [];
-  const collected = await Promise.all(entries.map((e) => walkEntry(e, "")));
-  return collected.flat();
+  return collected;
 }
 
 export function collectFilesFromInput(fileList: FileList): FileWithPath[] {
@@ -120,33 +156,12 @@ export function fallbackFromPlainFiles(files: File[]): FileWithPath[] {
     .map((f) => makeEntry(f, f.name));
 }
 
-// File System Access API handler for modern browsers (Chrome, Edge, Opera)
 async function collectFilesFromFileSystemAccessAPI(directoryHandle: FileSystemDirectoryHandle): Promise<FileWithPath[]> {
-  const results: FileWithPath[] = [];
-
-  async function processHandle(handle: FileSystemHandle, pathPrefix: string): Promise<void> {
-    if (handle.kind === "file") {
-      const file = await (handle as FileSystemFileHandle).getFile();
-      if (!isAllowedFile(file.name)) return;
-      const relativePath = pathPrefix + file.name;
-      results.push(makeEntry(file, relativePath));
-    } else if (handle.kind === "directory") {
-      const dirHandle = handle as FileSystemDirectoryHandle;
-      const entries = dirHandle.values();
-      for await (const entry of entries) {
-        await processHandle(entry, pathPrefix + dirHandle.name + "/");
-      }
-    }
-  }
-
-  await processHandle(directoryHandle, "");
-  return results;
+  return walkFileSystemHandle(directoryHandle, "");
 }
 
-// Open folder picker using File System Access API
 export async function openFolderPicker(): Promise<FileWithPath[] | null> {
   try {
-    // Check if File System Access API is available
     if (!("showDirectoryPicker" in window)) {
       console.warn("File System Access API not supported in this browser");
       return null;
@@ -155,7 +170,6 @@ export async function openFolderPicker(): Promise<FileWithPath[] | null> {
     const handle = await (window as unknown as { showDirectoryPicker: () => Promise<FileSystemDirectoryHandle> }).showDirectoryPicker();
     return await collectFilesFromFileSystemAccessAPI(handle);
   } catch (error) {
-    // User cancelled or error occurred
     if ((error as Error).name !== "AbortError") {
       console.error("Error opening folder picker:", error);
     }
