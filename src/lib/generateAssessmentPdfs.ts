@@ -377,14 +377,16 @@ export async function generateReport(opts: ReportOptions): Promise<Blob> {
     if (noAnswer) {
       const lines = doc.splitTextToSize("(No answer provided)", usableW - 16);
       optionMeasures.push({ lines, isSelected: false });
-      optionsBlockH += lines.length * 5 + 4;
+      optionsBlockH += lines.length * 5.4 + 5;
     } else {
-      const lines = doc.splitTextToSize(selected, usableW - 30);
+      const lines = doc.splitTextToSize(selected, usableW - 16);
       optionMeasures.push({ lines, isSelected: true });
-      optionsBlockH += lines.length * 5 + 3;
+      // pill height + "Your answer" caption line above (4mm)
+      optionsBlockH += lines.length * 5.4 + 5 + 4;
     }
 
-    const blockH = qLines.length * 5.5 + optionsBlockH + 6;
+    // question line-height 6.2, gap before answer 5, gap between blocks 7
+    const blockH = qLines.length * 6.2 + 5 + optionsBlockH + 7;
 
     // page break if needed
     if (y + blockH > pageH - 18) {
@@ -399,13 +401,20 @@ export async function generateReport(opts: ReportOptions): Promise<Blob> {
     doc.setFont("helvetica", "bold");
     doc.setFontSize(11);
     doc.text(qLines, marginX, y);
-    y += qLines.length * 5.5 + 2;
+    y += qLines.length * 6.2 + 5;
 
     // Options
     for (const m of optionMeasures) {
-      const pillH = m.lines.length * 5 + 3;
+      const pillH = m.lines.length * 5.4 + 5;
 
       if (m.isSelected) {
+        // "Your answer" caption ABOVE the pill, right-aligned (no overlap with answer text)
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(9);
+        doc.setTextColor(...PURPLE);
+        doc.text("Your answer", marginX + usableW, y, { align: "right" });
+        y += 4;
+
         // Light purple bg + purple outline pill
         doc.setFillColor(...LIGHT_PURPLE_BG);
         doc.setDrawColor(...PURPLE);
@@ -413,31 +422,26 @@ export async function generateReport(opts: ReportOptions): Promise<Blob> {
         doc.roundedRect(marginX, y - 1, usableW, pillH, 1.2, 1.2, "FD");
         // filled purple bullet
         doc.setFillColor(...PURPLE);
-        doc.circle(marginX + 6, y + 2.5, 1.4, "F");
-        // option text (bold navy)
+        doc.circle(marginX + 6, y + 3.2, 1.4, "F");
+        // option text (bold navy) — uses full pill width
         doc.setFont("helvetica", "bold");
         doc.setFontSize(10.5);
         doc.setTextColor(...NAVY);
-        doc.text(m.lines, marginX + 12, y + 3.5);
-        // "Your answer" right-aligned
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(9);
-        doc.setTextColor(...PURPLE);
-        doc.text("Your answer", marginX + usableW - 3, y + 3.5, { align: "right" });
+        doc.text(m.lines, marginX + 12, y + 4.2);
       } else {
         // empty circle bullet, gray text
         doc.setDrawColor(180, 184, 200);
         doc.setLineWidth(0.4);
-        doc.circle(marginX + 6, y + 2.5, 1.4, "S");
+        doc.circle(marginX + 6, y + 3.2, 1.4, "S");
         doc.setFont("helvetica", "normal");
         doc.setFontSize(10.5);
         doc.setTextColor(...INK);
-        doc.text(m.lines, marginX + 12, y + 3.5);
+        doc.text(m.lines, marginX + 12, y + 4.2);
       }
       y += pillH + 1;
     }
 
-    y += 5;
+    y += 7;
   });
 
   drawReportFooter(doc, respondent.name, assessmentTitle);
