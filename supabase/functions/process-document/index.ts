@@ -12,6 +12,114 @@ type CrossReferenceContext = {
   idNumber: string | null;
 };
 
+type FilenameHints = {
+  rawBase: string;
+  candidateName: string | null;
+  idNumber: string | null;
+  docTypeHint: string | null;
+  matchedConvention: boolean;
+};
+
+// Map known filename suffix tokens to canonical document_type enum values
+const SUFFIX_TO_DOCTYPE: Record<string, string> = {
+  "ba": "Beneficiary Agreement",
+  "beneficiaryagreement": "Beneficiary Agreement",
+  "ftc": "Employment Contract FTC",
+  "employmentcontract": "Employment Contract FTC",
+  "offerletter": "Offer Letter",
+  "offer": "Offer Letter",
+  "completionoftraining": "Certificate of Completion",
+  "completion": "Certificate of Completion",
+  "certificate": "Certificate of Completion",
+  "bankletter": "Bank Letter",
+  "bank": "Bank Letter",
+  "tcx": "TCX Unemployment Affidavit",
+  "unemploymentaffidavit": "Unemployment Affidavit",
+  "affidavit": "Unemployment Affidavit",
+  "eea1": "EEA1 Form",
+  "eea1form": "EEA1 Form",
+  "pwd": "PWDS Confirmation of Disability",
+  "pwds": "PWDS Confirmation of Disability",
+  "disability": "PWDS Confirmation of Disability",
+  "socialmediaconsent": "Social Media Consent",
+  "socialmedia": "Social Media Consent",
+  "consent": "Social Media Consent",
+  "cv": "CV",
+  "resume": "CV",
+  "declaration": "Capaciti Declaration",
+  "capacitideclaration": "Capaciti Declaration",
+  "matric": "Qualification Matric",
+  "qualification": "Qualification Matric",
+  "tax": "Tax Certificate",
+  "taxnumber": "Tax Certificate",
+  "taxcertificate": "Tax Certificate",
+  "irp5": "Tax Certificate",
+  "mie": "MIE Verification",
+  "id": "Certified ID",
+  "certifiedid": "Certified ID",
+  "idcopy": "Certified ID",
+  "iddocument": "Certified ID",
+};
+
+// Split CamelCase/PascalCase into spaced words: "JohnDoe" -> "John Doe"
+function splitCamelCase(input: string): string {
+  return input
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .replace(/\s+/g, " ");
+}
+
+function matchPartialSuffix(suffix: string): string | null {
+  for (const [key, val] of Object.entries(SUFFIX_TO_DOCTYPE)) {
+    if (suffix.includes(key)) return val;
+  }
+  return null;
+}
+
+// Parse filename of the form name_surname_IDno_doctype, namesurname_IDno_doctype,
+// or variations using -, space, or . separators. Filename info wins on conflict.
+function parseFilename(fileName: string): FilenameHints {
+  const base = fileName.replace(/\.[^.]+$/, ""); // strip extension
+  const result: FilenameHints = {
+    rawBase: base,
+    candidateName: null,
+    idNumber: null,
+    docTypeHint: null,
+    matchedConvention: false,
+  };
+
+  // Find a 13-digit SA ID number anywhere in the filename
+  const idMatch = base.match(/(?<!\d)(\d{13})(?!\d)/);
+  if (idMatch) result.idNumber = idMatch[1];
+
+  // Split on common separators
+  const tokens = base.split(/[_\-\s.]+/).filter(Boolean);
+  if (tokens.length === 0) return result;
+
+  // Identify ID token index (if any)
+  const idTokenIndex = tokens.findIndex((t) => /^\d{13}$/.test(t));
+
+  // Tokens BEFORE the ID number are candidate name parts
+  // Tokens AFTER the ID number are doc type hint
+  if (idTokenIndex > 0) {
+    const nameTokens = tokens.slice(0, idTokenIndex);
+    result.candidateName = splitCamelCase(nameTokens.join(" ")).trim() || null;
+    if (idTokenIndex + 1 < tokens.length) {
+      const suffixRaw = tokens.slice(idTokenIndex + 1).join("").toLowerCase().replace(/[^a-z0-9]/g, "");
+      result.docTypeHint = SUFFIX_TO_DOCTYPE[suffixRaw] || matchPartialSuffix(suffixRaw);
+    }
+    result.matchedConvention = !!(result.candidateName && result.idNumber);
+  } else if (idTokenIndex === -1) {
+    // No ID in filename — weak name guess only
+    const guess = splitCamelCase(tokens.join(" ")).trim();
+    if (guess && /[a-z]/i.test(guess) && guess.length >= 3) {
+      result.candidateName = guess;
+    }
+  }
+
+  return result;
+}
+
 const toolSchema = {
   type: "function",
   function: {
@@ -309,7 +417,8 @@ For any document that does not match the above types:
 INFORMATION EXTRACTION RULES:
 - You MUST extract ALL readable information into extracted_info
 - Extract names, ID numbers, dates, addresses, phone numbers, emails, reference numbers
-- Read handwritten ticks, crosses, circles, and check boxes carefully — they carry critical answers (e.g. TCX Q1/Q2, EEA1 race/disability/foreign-national)
+- HANDWRITTEN CONTENT: Many Capaciti documents are filled in by hand using a pen. Treat handwritten text, signatures, dates, ticks, crosses, circles, initials, and check boxes with the SAME rigor as printed text. Do your best to transcribe handwritten names, ID numbers, dates and answers — never skip a field just because it is handwritten. If handwriting is genuinely illegible after careful inspection, say so explicitly in the relevant check detail rather than marking the field as missing.
+- Read handwritten answers on TCX Q1/Q2, EEA1 race/disability/foreign-national, affidavits, declarations, disability forms, and any signature/date blocks
 - Read ALL pages of multi-page documents before deciding required information is missing
 - Stamps may overlap printed text — still extract stamp details where visible
 - Leave fields as empty string if not found — never invent information.
@@ -398,11 +507,20 @@ async function fetchFileAsBase64(fileUrl: string): Promise<string> {
   return btoa(binary);
 }
 
-async function buildUserContent(fileUrl: string, fileName: string, crossReferenceContext: CrossReferenceContext): Promise<any[]> {
+async function buildUserContent(fileUrl: string, fileName: string, crossReferenceContext: CrossReferenceContext, filenameHints: FilenameHints): Promise<any[]> {
   const crossReferencePrompt = crossReferenceContext.available
     ? `Cross-reference context is available. Candidate name: "${crossReferenceContext.candidateName || "Unknown"}". Candidate ID number from uploaded ID document: "${crossReferenceContext.idNumber || "Unknown"}". Use that uploaded ID information only for document types that require ID matching.`
     : `Cross-reference context is not available. Do not perform candidate ID cross-reference checks, and do not raise a fail or warning just because no ID document was uploaded with this candidate's documents.`;
-  const textPrompt = `Analyze this document and validate it thoroughly. Filename: "${fileName}". ${crossReferencePrompt} Check all pages before deciding anything is missing. Do not stop at the first pages of a multi-page document. Read pen marks, ticks, handwritten selections, and check boxes carefully because they contain important answers. Remember to extract stamp dates, police station names, and certification authority details even when stamps overlap words. For employment equity forms, treat the nationality answer as Yes or No: No means South African, Yes means foreign national. If foreign national is marked yes, extract the acquired date of nationality, residence date, or permit-related date into extracted_info.foreign_national_support_date. For contracts, page 10 employee details is an information page and does not require employee or employer signatures. Some contracts require only the employee signature while others require both employee and employer signatures, so decide from the actual signature blocks and wording on the relevant signature page. For disability and proof-of-address documents, do not require Capaciti formatting if the core identifying information and stamps/signatures are present. If the filename or readable contents clearly indicate MIE verification, a course or training completion certificate, or another listed supporting document type, classify it using that specific document_type instead of "Other". For unfamiliar documents, still extract all readable information and verify candidate name, surname, and ID number where present. Mark non-required missing stamp or certification findings as warning checks prefixed with "Optional -". Respond using the extract_document_info function. Be thorough in your validation checks.`;
+
+  const filenameHintParts: string[] = [];
+  if (filenameHints.candidateName) filenameHintParts.push(`candidate name "${filenameHints.candidateName}"`);
+  if (filenameHints.idNumber) filenameHintParts.push(`ID number "${filenameHints.idNumber}"`);
+  if (filenameHints.docTypeHint) filenameHintParts.push(`document type "${filenameHints.docTypeHint}"`);
+  const filenamePrompt = filenameHintParts.length > 0
+    ? `FILENAME HINTS (authoritative for identification — admin-named): The filename suggests ${filenameHintParts.join(", ")}. Use these as your primary signal for candidate_name, extracted_id_number, and document_type. Confirm them against the actual document content; if the document content clearly contradicts the filename, still extract what the document says but flag the mismatch in your summary. Filename wins on conflict for candidate identification.`
+    : `FILENAME HINTS: Could not parse a recognised pattern from "${fileName}". Identify the candidate and document type from content alone.`;
+
+  const textPrompt = `Analyze this document and validate it thoroughly. Filename: "${fileName}". ${filenamePrompt} ${crossReferencePrompt} Check all pages before deciding anything is missing. Do not stop at the first pages of a multi-page document. Read pen marks, ticks, handwritten selections, and check boxes carefully because they contain important answers. Many forms are filled in by hand — transcribe handwritten names, IDs, dates and signatures with the same care as printed text. Remember to extract stamp dates, police station names, and certification authority details even when stamps overlap words. For employment equity forms, treat the nationality answer as Yes or No: No means South African, Yes means foreign national. If foreign national is marked yes, extract the acquired date of nationality, residence date, or permit-related date into extracted_info.foreign_national_support_date. For contracts, page 10 employee details is an information page and does not require employee or employer signatures. Some contracts require only the employee signature while others require both employee and employer signatures, so decide from the actual signature blocks and wording on the relevant signature page. For disability and proof-of-address documents, do not require Capaciti formatting if the core identifying information and stamps/signatures are present. If the filename or readable contents clearly indicate MIE verification, a course or training completion certificate, or another listed supporting document type, classify it using that specific document_type instead of "Other". For unfamiliar documents, still extract all readable information and verify candidate name, surname, and ID number where present. Mark non-required missing stamp or certification findings as warning checks prefixed with "Optional -". Respond using the extract_document_info function. Be thorough in your validation checks.`;
   
   try {
     const base64 = await fetchFileAsBase64(fileUrl);
@@ -436,8 +554,8 @@ async function buildUserContent(fileUrl: string, fileName: string, crossReferenc
   }
 }
 
-async function analyzeWithOpenRouter(apiKey: string, model: string, systemPrompt: string, fileUrl: string, fileName: string, crossReferenceContext: CrossReferenceContext, asyncMode: boolean = false, documentId?: string) {
-  const userContent = await buildUserContent(fileUrl, fileName, crossReferenceContext);
+async function analyzeWithOpenRouter(apiKey: string, model: string, systemPrompt: string, fileUrl: string, fileName: string, crossReferenceContext: CrossReferenceContext, filenameHints: FilenameHints, asyncMode: boolean = false, documentId?: string) {
+  const userContent = await buildUserContent(fileUrl, fileName, crossReferenceContext, filenameHints);
 
   const body: Record<string, any> = {
     model,
@@ -549,6 +667,10 @@ serve(async (req) => {
       }
     }
 
+    // Parse filename for candidate name, ID, and document type hints
+    const filenameHints = parseFilename(file_name);
+    console.log(`Filename hints for "${file_name}":`, JSON.stringify(filenameHints));
+
     const systemPrompt = buildSystemPrompt(confidenceThreshold, stampValidityMonths, strictMode, crossReferenceContext);
 
     let aiResponse: Response;
@@ -557,7 +679,7 @@ serve(async (req) => {
     // All AI processing goes through OpenRouter
     if (async_mode) {
       console.log(`Using OpenRouter ASYNC mode (model: ${aiModel}) for document:`, document_id);
-      const asyncResult = await analyzeWithOpenRouter(OPENROUTER_API_KEY, aiModel, systemPrompt, file_url, file_name, crossReferenceContext, true, document_id);
+      const asyncResult = await analyzeWithOpenRouter(OPENROUTER_API_KEY, aiModel, systemPrompt, file_url, file_name, crossReferenceContext, filenameHints, true, document_id);
       
       if (asyncResult.ok) {
         return new Response(JSON.stringify({
@@ -577,7 +699,7 @@ serve(async (req) => {
 
     // Sync mode with OpenRouter
     console.log(`Using OpenRouter (sync, model: ${aiModel}) for document analysis`);
-    aiResponse = await analyzeWithOpenRouter(OPENROUTER_API_KEY, aiModel, systemPrompt, file_url, file_name, crossReferenceContext);
+    aiResponse = await analyzeWithOpenRouter(OPENROUTER_API_KEY, aiModel, systemPrompt, file_url, file_name, crossReferenceContext, filenameHints);
 
     if (!aiResponse.ok) {
       const status = aiResponse.status;
@@ -637,6 +759,60 @@ serve(async (req) => {
       } catch (e) {
         console.error("Failed to parse AI response:", e);
       }
+    }
+
+    // ── Filename-wins override for candidate identification ──
+    // The admin named the file, so trust filename for candidate_name, ID, and doc type.
+    // Surface mismatches as warnings instead of silently overriding.
+    const filenameOverrideChecks: { name: string; status: string; detail: string }[] = [];
+    const aiCandidateName = (extracted.candidate_name || "").trim();
+    const aiIdNumber = (extracted.extracted_id_number || extracted.extracted_info?.id_number || "").toString().replace(/\s/g, "");
+
+    if (filenameHints.candidateName) {
+      const filenameNameNorm = filenameHints.candidateName.toLowerCase().replace(/\s+/g, "");
+      const aiNameNorm = aiCandidateName.toLowerCase().replace(/\s+/g, "");
+      const namesAgree = aiNameNorm && (filenameNameNorm.includes(aiNameNorm) || aiNameNorm.includes(filenameNameNorm));
+
+      if (!aiCandidateName || aiCandidateName.toLowerCase() === "unknown") {
+        extracted.candidate_name = filenameHints.candidateName;
+      } else if (!namesAgree) {
+        // Conflict — filename wins, raise a warning
+        filenameOverrideChecks.push({
+          name: "Filename vs document name match",
+          status: "warning",
+          detail: `Filename indicates "${filenameHints.candidateName}" but document content reads "${aiCandidateName}". Using filename for grouping; please verify.`,
+        });
+        extracted.candidate_name = filenameHints.candidateName;
+      }
+    }
+
+    if (filenameHints.idNumber) {
+      if (!aiIdNumber || aiIdNumber.length !== 13) {
+        extracted.extracted_id_number = filenameHints.idNumber;
+        extracted.extracted_info = { ...(extracted.extracted_info || {}), id_number: filenameHints.idNumber };
+      } else if (aiIdNumber !== filenameHints.idNumber) {
+        filenameOverrideChecks.push({
+          name: "Filename vs document ID number match",
+          status: "warning",
+          detail: `Filename ID "${filenameHints.idNumber}" does not match document ID "${aiIdNumber}". Using filename ID; please verify.`,
+        });
+        extracted.extracted_id_number = filenameHints.idNumber;
+        extracted.extracted_info = { ...(extracted.extracted_info || {}), id_number: filenameHints.idNumber };
+      }
+    }
+
+    // If AI returned "Other" but filename has a recognised doc type suffix, prefer the filename type
+    if (filenameHints.docTypeHint && (extracted.document_type === "Other" || !extracted.document_type)) {
+      filenameOverrideChecks.push({
+        name: "Document type from filename",
+        status: "pass",
+        detail: `Document type inferred from filename suffix as "${filenameHints.docTypeHint}".`,
+      });
+      extracted.document_type = filenameHints.docTypeHint;
+    }
+
+    if (filenameOverrideChecks.length > 0) {
+      extracted.checks = [...(extracted.checks || []), ...filenameOverrideChecks];
     }
 
     // ── SA ID Structural Validation (Luhn checksum) ──
