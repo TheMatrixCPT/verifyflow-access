@@ -120,16 +120,17 @@ const SessionDetail = () => {
       const hasWarning = visibleDocuments.some((document) => document.status === "warning");
       const visibleStatus = hasFailure ? "fail" : hasWarning ? "warning" : "pass";
 
-      return {
+      const result: CandidateData = {
         ...candidate,
         documents: visibleDocuments,
         primaryDocumentLabel: buildDocumentTypeLabel(visibleDocuments),
         score: visibleChecks.length > 0 ? calculateValidationScore(visibleChecks) : candidate.score,
         status: visibleStatus,
         issues: visibleIssues,
-      } satisfies CandidateData;
+      };
+      return result;
     })
-    .filter((candidate): candidate is CandidateData => Boolean(candidate))
+    .filter((candidate): candidate is CandidateData => candidate !== null)
     .filter((candidate) => {
       const query = searchQuery.toLowerCase();
       return candidate.name.toLowerCase().includes(query) || candidate.idNumber.includes(searchQuery);
