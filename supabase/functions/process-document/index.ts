@@ -679,7 +679,7 @@ serve(async (req) => {
     // All AI processing goes through OpenRouter
     if (async_mode) {
       console.log(`Using OpenRouter ASYNC mode (model: ${aiModel}) for document:`, document_id);
-      const asyncResult = await analyzeWithOpenRouter(OPENROUTER_API_KEY, aiModel, systemPrompt, file_url, file_name, crossReferenceContext, true, document_id);
+      const asyncResult = await analyzeWithOpenRouter(OPENROUTER_API_KEY, aiModel, systemPrompt, file_url, file_name, crossReferenceContext, filenameHints, true, document_id);
       
       if (asyncResult.ok) {
         return new Response(JSON.stringify({
