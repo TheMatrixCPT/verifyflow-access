@@ -417,7 +417,8 @@ For any document that does not match the above types:
 INFORMATION EXTRACTION RULES:
 - You MUST extract ALL readable information into extracted_info
 - Extract names, ID numbers, dates, addresses, phone numbers, emails, reference numbers
-- Read handwritten ticks, crosses, circles, and check boxes carefully — they carry critical answers (e.g. TCX Q1/Q2, EEA1 race/disability/foreign-national)
+- HANDWRITTEN CONTENT: Many Capaciti documents are filled in by hand using a pen. Treat handwritten text, signatures, dates, ticks, crosses, circles, initials, and check boxes with the SAME rigor as printed text. Do your best to transcribe handwritten names, ID numbers, dates and answers — never skip a field just because it is handwritten. If handwriting is genuinely illegible after careful inspection, say so explicitly in the relevant check detail rather than marking the field as missing.
+- Read handwritten answers on TCX Q1/Q2, EEA1 race/disability/foreign-national, affidavits, declarations, disability forms, and any signature/date blocks
 - Read ALL pages of multi-page documents before deciding required information is missing
 - Stamps may overlap printed text — still extract stamp details where visible
 - Leave fields as empty string if not found — never invent information.
