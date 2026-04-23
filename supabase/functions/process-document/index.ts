@@ -667,6 +667,10 @@ serve(async (req) => {
       }
     }
 
+    // Parse filename for candidate name, ID, and document type hints
+    const filenameHints = parseFilename(file_name);
+    console.log(`Filename hints for "${file_name}":`, JSON.stringify(filenameHints));
+
     const systemPrompt = buildSystemPrompt(confidenceThreshold, stampValidityMonths, strictMode, crossReferenceContext);
 
     let aiResponse: Response;
