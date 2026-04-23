@@ -554,8 +554,8 @@ async function buildUserContent(fileUrl: string, fileName: string, crossReferenc
   }
 }
 
-async function analyzeWithOpenRouter(apiKey: string, model: string, systemPrompt: string, fileUrl: string, fileName: string, crossReferenceContext: CrossReferenceContext, asyncMode: boolean = false, documentId?: string) {
-  const userContent = await buildUserContent(fileUrl, fileName, crossReferenceContext);
+async function analyzeWithOpenRouter(apiKey: string, model: string, systemPrompt: string, fileUrl: string, fileName: string, crossReferenceContext: CrossReferenceContext, filenameHints: FilenameHints, asyncMode: boolean = false, documentId?: string) {
+  const userContent = await buildUserContent(fileUrl, fileName, crossReferenceContext, filenameHints);
 
   const body: Record<string, any> = {
     model,
