@@ -12,6 +12,114 @@ type CrossReferenceContext = {
   idNumber: string | null;
 };
 
+type FilenameHints = {
+  rawBase: string;
+  candidateName: string | null;
+  idNumber: string | null;
+  docTypeHint: string | null;
+  matchedConvention: boolean;
+};
+
+// Map known filename suffix tokens to canonical document_type enum values
+const SUFFIX_TO_DOCTYPE: Record<string, string> = {
+  "ba": "Beneficiary Agreement",
+  "beneficiaryagreement": "Beneficiary Agreement",
+  "ftc": "Employment Contract FTC",
+  "employmentcontract": "Employment Contract FTC",
+  "offerletter": "Offer Letter",
+  "offer": "Offer Letter",
+  "completionoftraining": "Certificate of Completion",
+  "completion": "Certificate of Completion",
+  "certificate": "Certificate of Completion",
+  "bankletter": "Bank Letter",
+  "bank": "Bank Letter",
+  "tcx": "TCX Unemployment Affidavit",
+  "unemploymentaffidavit": "Unemployment Affidavit",
+  "affidavit": "Unemployment Affidavit",
+  "eea1": "EEA1 Form",
+  "eea1form": "EEA1 Form",
+  "pwd": "PWDS Confirmation of Disability",
+  "pwds": "PWDS Confirmation of Disability",
+  "disability": "PWDS Confirmation of Disability",
+  "socialmediaconsent": "Social Media Consent",
+  "socialmedia": "Social Media Consent",
+  "consent": "Social Media Consent",
+  "cv": "CV",
+  "resume": "CV",
+  "declaration": "Capaciti Declaration",
+  "capacitideclaration": "Capaciti Declaration",
+  "matric": "Qualification Matric",
+  "qualification": "Qualification Matric",
+  "tax": "Tax Certificate",
+  "taxnumber": "Tax Certificate",
+  "taxcertificate": "Tax Certificate",
+  "irp5": "Tax Certificate",
+  "mie": "MIE Verification",
+  "id": "Certified ID",
+  "certifiedid": "Certified ID",
+  "idcopy": "Certified ID",
+  "iddocument": "Certified ID",
+};
+
+// Split CamelCase/PascalCase into spaced words: "JohnDoe" -> "John Doe"
+function splitCamelCase(input: string): string {
+  return input
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .replace(/\s+/g, " ");
+}
+
+function matchPartialSuffix(suffix: string): string | null {
+  for (const [key, val] of Object.entries(SUFFIX_TO_DOCTYPE)) {
+    if (suffix.includes(key)) return val;
+  }
+  return null;
+}
+
+// Parse filename of the form name_surname_IDno_doctype, namesurname_IDno_doctype,
+// or variations using -, space, or . separators. Filename info wins on conflict.
+function parseFilename(fileName: string): FilenameHints {
+  const base = fileName.replace(/\.[^.]+$/, ""); // strip extension
+  const result: FilenameHints = {
+    rawBase: base,
+    candidateName: null,
+    idNumber: null,
+    docTypeHint: null,
+    matchedConvention: false,
+  };
+
+  // Find a 13-digit SA ID number anywhere in the filename
+  const idMatch = base.match(/(?<!\d)(\d{13})(?!\d)/);
+  if (idMatch) result.idNumber = idMatch[1];
+
+  // Split on common separators
+  const tokens = base.split(/[_\-\s.]+/).filter(Boolean);
+  if (tokens.length === 0) return result;
+
+  // Identify ID token index (if any)
+  const idTokenIndex = tokens.findIndex((t) => /^\d{13}$/.test(t));
+
+  // Tokens BEFORE the ID number are candidate name parts
+  // Tokens AFTER the ID number are doc type hint
+  if (idTokenIndex > 0) {
+    const nameTokens = tokens.slice(0, idTokenIndex);
+    result.candidateName = splitCamelCase(nameTokens.join(" ")).trim() || null;
+    if (idTokenIndex + 1 < tokens.length) {
+      const suffixRaw = tokens.slice(idTokenIndex + 1).join("").toLowerCase().replace(/[^a-z0-9]/g, "");
+      result.docTypeHint = SUFFIX_TO_DOCTYPE[suffixRaw] || matchPartialSuffix(suffixRaw);
+    }
+    result.matchedConvention = !!(result.candidateName && result.idNumber);
+  } else if (idTokenIndex === -1) {
+    // No ID in filename — weak name guess only
+    const guess = splitCamelCase(tokens.join(" ")).trim();
+    if (guess && /[a-z]/i.test(guess) && guess.length >= 3) {
+      result.candidateName = guess;
+    }
+  }
+
+  return result;
+}
+
 const toolSchema = {
   type: "function",
   function: {
