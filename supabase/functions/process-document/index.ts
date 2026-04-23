@@ -761,6 +761,60 @@ serve(async (req) => {
       }
     }
 
+    // ── Filename-wins override for candidate identification ──
+    // The admin named the file, so trust filename for candidate_name, ID, and doc type.
+    // Surface mismatches as warnings instead of silently overriding.
+    const filenameOverrideChecks: { name: string; status: string; detail: string }[] = [];
+    const aiCandidateName = (extracted.candidate_name || "").trim();
+    const aiIdNumber = (extracted.extracted_id_number || extracted.extracted_info?.id_number || "").toString().replace(/\s/g, "");
+
+    if (filenameHints.candidateName) {
+      const filenameNameNorm = filenameHints.candidateName.toLowerCase().replace(/\s+/g, "");
+      const aiNameNorm = aiCandidateName.toLowerCase().replace(/\s+/g, "");
+      const namesAgree = aiNameNorm && (filenameNameNorm.includes(aiNameNorm) || aiNameNorm.includes(filenameNameNorm));
+
+      if (!aiCandidateName || aiCandidateName.toLowerCase() === "unknown") {
+        extracted.candidate_name = filenameHints.candidateName;
+      } else if (!namesAgree) {
+        // Conflict — filename wins, raise a warning
+        filenameOverrideChecks.push({
+          name: "Filename vs document name match",
+          status: "warning",
+          detail: `Filename indicates "${filenameHints.candidateName}" but document content reads "${aiCandidateName}". Using filename for grouping; please verify.`,
+        });
+        extracted.candidate_name = filenameHints.candidateName;
+      }
+    }
+
+    if (filenameHints.idNumber) {
+      if (!aiIdNumber || aiIdNumber.length !== 13) {
+        extracted.extracted_id_number = filenameHints.idNumber;
+        extracted.extracted_info = { ...(extracted.extracted_info || {}), id_number: filenameHints.idNumber };
+      } else if (aiIdNumber !== filenameHints.idNumber) {
+        filenameOverrideChecks.push({
+          name: "Filename vs document ID number match",
+          status: "warning",
+          detail: `Filename ID "${filenameHints.idNumber}" does not match document ID "${aiIdNumber}". Using filename ID; please verify.`,
+        });
+        extracted.extracted_id_number = filenameHints.idNumber;
+        extracted.extracted_info = { ...(extracted.extracted_info || {}), id_number: filenameHints.idNumber };
+      }
+    }
+
+    // If AI returned "Other" but filename has a recognised doc type suffix, prefer the filename type
+    if (filenameHints.docTypeHint && (extracted.document_type === "Other" || !extracted.document_type)) {
+      filenameOverrideChecks.push({
+        name: "Document type from filename",
+        status: "pass",
+        detail: `Document type inferred from filename suffix as "${filenameHints.docTypeHint}".`,
+      });
+      extracted.document_type = filenameHints.docTypeHint;
+    }
+
+    if (filenameOverrideChecks.length > 0) {
+      extracted.checks = [...(extracted.checks || []), ...filenameOverrideChecks];
+    }
+
     // ── SA ID Structural Validation (Luhn checksum) ──
     extracted.extracted_info = normalizeExtractedInfo(extracted.extracted_info) ?? null;
     const idToValidate = extracted.extracted_id_number || extracted.extracted_info?.id_number;
