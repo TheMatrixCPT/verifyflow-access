@@ -699,7 +699,7 @@ serve(async (req) => {
 
     // Sync mode with OpenRouter
     console.log(`Using OpenRouter (sync, model: ${aiModel}) for document analysis`);
-    aiResponse = await analyzeWithOpenRouter(OPENROUTER_API_KEY, aiModel, systemPrompt, file_url, file_name, crossReferenceContext);
+    aiResponse = await analyzeWithOpenRouter(OPENROUTER_API_KEY, aiModel, systemPrompt, file_url, file_name, crossReferenceContext, filenameHints);
 
     if (!aiResponse.ok) {
       const status = aiResponse.status;
