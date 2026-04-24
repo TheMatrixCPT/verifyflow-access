@@ -20,9 +20,7 @@ type FilenameHints = {
   matchedConvention: boolean;
 };
 
-// Map known filename suffix tokens to canonical document_type enum values.
-// NOTE: Keep multi-word/explicit aliases here. Order does not matter for the
-// matcher below — `matchPartialSuffix` always prefers the LONGEST key match.
+// Map known filename suffix tokens to canonical document_type enum values
 const SUFFIX_TO_DOCTYPE: Record<string, string> = {
   "ba": "Beneficiary Agreement",
   "beneficiaryagreement": "Beneficiary Agreement",
@@ -57,20 +55,11 @@ const SUFFIX_TO_DOCTYPE: Record<string, string> = {
   "taxcertificate": "Tax Certificate",
   "irp5": "Tax Certificate",
   "mie": "MIE Verification",
-  "mieverification": "MIE Verification",
-  "mieconsent": "MIE Verification",
-  "miecheck": "MIE Verification",
   "id": "Certified ID",
   "certifiedid": "Certified ID",
   "idcopy": "Certified ID",
   "iddocument": "Certified ID",
 };
-
-// Keys ≤3 chars are ambiguous as substrings ("id" inside "consider", "ba"
-// inside "bank") so we require a stricter match for them.
-const SHORT_SUFFIX_KEYS = new Set(
-  Object.keys(SUFFIX_TO_DOCTYPE).filter((k) => k.length <= 3),
-);
 
 // Split CamelCase/PascalCase into spaced words: "JohnDoe" -> "John Doe"
 function splitCamelCase(input: string): string {
@@ -80,42 +69,11 @@ function splitCamelCase(input: string): string {
     .replace(/\s+/g, " ");
 }
 
-// Improved suffix matcher.
-// Strategy:
-//  1. Collect every key that appears in `suffix`.
-//  2. For SHORT keys (≤3 chars), require the key to appear as a standalone
-//     token (i.e. surrounded by non-letter boundaries in the original raw
-//     suffix, or be the entire suffix). This avoids false hits like
-//     "consider" → "id".
-//  3. Among remaining candidates, pick the LONGEST key. On tie, pick the one
-//     that starts LATEST in the suffix (last token wins — closest to the end
-//     of the filename, which is where the doc-type marker normally lives).
-function matchPartialSuffix(suffix: string, rawSuffix?: string): string | null {
-  const candidates: { key: string; val: string; pos: number }[] = [];
-  const boundaryRaw = (rawSuffix ?? suffix).toLowerCase();
-
+function matchPartialSuffix(suffix: string): string | null {
   for (const [key, val] of Object.entries(SUFFIX_TO_DOCTYPE)) {
-    const pos = suffix.lastIndexOf(key);
-    if (pos === -1) continue;
-
-    if (SHORT_SUFFIX_KEYS.has(key)) {
-      // Require the short key to appear as a standalone token in the raw
-      // (un-normalised) suffix — bounded by start/end or non-alphanumerics.
-      const tokenRe = new RegExp(`(^|[^a-z0-9])${key}([^a-z0-9]|$)`, "i");
-      if (!tokenRe.test(boundaryRaw)) continue;
-    }
-
-    candidates.push({ key, val, pos });
+    if (suffix.includes(key)) return val;
   }
-
-  if (candidates.length === 0) return null;
-
-  candidates.sort((a, b) => {
-    if (b.key.length !== a.key.length) return b.key.length - a.key.length;
-    return b.pos - a.pos; // later position wins on length tie
-  });
-
-  return candidates[0].val;
+  return null;
 }
 
 // Parse filename of the form name_surname_IDno_doctype, namesurname_IDno_doctype,
@@ -147,12 +105,8 @@ function parseFilename(fileName: string): FilenameHints {
     const nameTokens = tokens.slice(0, idTokenIndex);
     result.candidateName = splitCamelCase(nameTokens.join(" ")).trim() || null;
     if (idTokenIndex + 1 < tokens.length) {
-      // Preserve separators for boundary checks on short keys
-      const suffixWithBoundaries = tokens.slice(idTokenIndex + 1).join(" ").toLowerCase();
-      const suffixRaw = suffixWithBoundaries.replace(/[^a-z0-9]/g, "");
-      result.docTypeHint =
-        SUFFIX_TO_DOCTYPE[suffixRaw] ||
-        matchPartialSuffix(suffixRaw, suffixWithBoundaries);
+      const suffixRaw = tokens.slice(idTokenIndex + 1).join("").toLowerCase().replace(/[^a-z0-9]/g, "");
+      result.docTypeHint = SUFFIX_TO_DOCTYPE[suffixRaw] || matchPartialSuffix(suffixRaw);
     }
     result.matchedConvention = !!(result.candidateName && result.idNumber);
   } else if (idTokenIndex === -1) {
@@ -1099,25 +1053,14 @@ serve(async (req) => {
       }
     }
 
-    // If AI returned "Other" but filename has a recognised doc type suffix, prefer the filename type.
-    // If AI confidently identified a DIFFERENT known doc type, trust the AI and downgrade the
-    // filename hint to an informational note rather than overriding (avoids the false
-    // "Filename vs content mismatch" warnings caused by ambiguous fuzzy suffix matches).
-    if (filenameHints.docTypeHint) {
-      if (extracted.document_type === "Other" || !extracted.document_type) {
-        filenameOverrideChecks.push({
-          name: "Document type from filename",
-          status: "pass",
-          detail: `Document type inferred from filename suffix as "${filenameHints.docTypeHint}".`,
-        });
-        extracted.document_type = filenameHints.docTypeHint;
-      } else if (extracted.document_type !== filenameHints.docTypeHint) {
-        filenameOverrideChecks.push({
-          name: "Filename hint note",
-          status: "pass",
-          detail: `Filename suggested "${filenameHints.docTypeHint}" but document content was identified as "${extracted.document_type}". Trusting document content.`,
-        });
-      }
+    // If AI returned "Other" but filename has a recognised doc type suffix, prefer the filename type
+    if (filenameHints.docTypeHint && (extracted.document_type === "Other" || !extracted.document_type)) {
+      filenameOverrideChecks.push({
+        name: "Document type from filename",
+        status: "pass",
+        detail: `Document type inferred from filename suffix as "${filenameHints.docTypeHint}".`,
+      });
+      extracted.document_type = filenameHints.docTypeHint;
     }
 
     if (filenameOverrideChecks.length > 0) {
