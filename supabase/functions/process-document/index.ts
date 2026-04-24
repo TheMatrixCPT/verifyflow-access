@@ -1067,6 +1067,12 @@ serve(async (req) => {
       extracted.checks = [...(extracted.checks || []), ...filenameOverrideChecks];
     }
 
+    // ── Stage B reconciliation: handwriting recognition pass ──
+    const handwritingChecks = reconcileHandwriting(extracted, handwriting);
+    if (handwritingChecks.length > 0) {
+      extracted.checks = [...(extracted.checks || []), ...handwritingChecks];
+    }
+
     // ── SA ID Structural Validation (Luhn checksum) ──
     extracted.extracted_info = normalizeExtractedInfo(extracted.extracted_info) ?? null;
     const idToValidate = extracted.extracted_id_number || extracted.extracted_info?.id_number;
