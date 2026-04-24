@@ -944,9 +944,14 @@ serve(async (req) => {
       }
     }
 
-    // Sync mode with OpenRouter
-    console.log(`Using OpenRouter (sync, model: ${aiModel}) for document analysis`);
-    aiResponse = await analyzeWithOpenRouter(OPENROUTER_API_KEY, aiModel, systemPrompt, file_url, file_name, crossReferenceContext, filenameHints);
+    // Sync mode with OpenRouter — run Stage A (validation) and Stage B (handwriting) in parallel
+    console.log(`Using OpenRouter (sync, model: ${aiModel}) for document analysis + handwriting pass`);
+    const [aiResponseRes, handwritingRes] = await Promise.all([
+      analyzeWithOpenRouter(OPENROUTER_API_KEY, aiModel, systemPrompt, file_url, file_name, crossReferenceContext, filenameHints),
+      analyzeHandwriting(OPENROUTER_API_KEY, file_url, file_name),
+    ]);
+    aiResponse = aiResponseRes;
+    const handwriting = handwritingRes;
 
     if (!aiResponse.ok) {
       const status = aiResponse.status;
