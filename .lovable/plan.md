@@ -1,100 +1,79 @@
-## Add Neural-Network Handwriting Recognition to Document Validation
+# Stop documents from being misclassified as "Other"
 
-Strengthen the existing document validation pipeline with a dedicated handwriting recognition step powered by a vision neural network model. This complements (does not replace) the current Gemini-based extraction and the filename-wins identification logic. The Assessment Tools system is not touched.
+The screenshot shows `AmkeleYamani_9912125698081_Proof of Address.pdf` ending up as **Other**. The edge function logs confirm the root cause:
 
-### Why This Is Needed
-
-Today the AI prompt asks Gemini to "treat handwritten text with the same rigor as printed text", but for many Capaciti documents (Affidavits, EEA1, TCX, PWDS, Declarations, BA initials, signature/date blocks) the model still misses or misreads pen-filled fields. We need a more deterministic neural-network pass focused specifically on handwriting + checkbox/tick/circle marks, then feed those results back into validation.
-
-### What Changes for the User
-
-In the **Document Validation flow only**:
-- Each handwriting-heavy document now gets a small new section in the candidate modal: *"Handwriting recognition"* — shows the transcribed handwritten fields (name, ID, dates, ticks, signatures present/absent) the neural network read, with a confidence score per field.
-- When the neural-network reading conflicts with the filename or with Gemini's extraction, the document gets a `warning` check named `"Handwriting vs printed/filename mismatch"` with both readings shown — the admin decides.
-- "Unknown candidate" rate drops further because handwritten names on affidavits/EEA1 forms are now read by a model trained for handwriting, not just generic OCR.
-- TCX Question 1 / Question 2 NO-circle detection, EEA1 race/disability ticks, and signature-present detection become much more reliable.
-
-### Technical Plan
-
-**1. Two-stage pipeline inside `process-document` edge function**
-
-```text
-Stage A (existing): Gemini 2.5 Flash via OpenRouter
-  → document_type, candidate_name, structured extracted_info, all checks
-
-Stage B (new): Handwriting neural network pass (parallel, same base64 image)
-  → handwritten_fields: { name, surname, id_number, date, ticks[], signature_present }
-  → per-field confidence
-
-Stage C (new): Reconciliation
-  → Filename wins on candidate identity (already implemented)
-  → Handwriting wins on hand-filled form fields when Gemini left them blank
-  → Disagreements surfaced as "warning" checks, never silent overwrites
+```
+Filename hints for "AmkeleYamani_9912125698081_Proof of Address.pdf":
+  {"docTypeHint":null, ...}
 ```
 
-**2. Model choice — use OpenRouter (keeps existing stack)**
+So no build/runtime error — the edge function ran cleanly. The bug is logic-only inside `supabase/functions/process-document/index.ts`.
 
-Per `mem://tech/ai-stack`, the project is "Exclusively OpenRouter". Add a second OpenRouter call to a vision model specifically prompted as a handwriting-recognition neural network:
-- Primary: `google/gemini-2.5-pro` with a tightly-scoped handwriting-only prompt + tool schema (it's the strongest multimodal reasoner available via OpenRouter and handles handwriting + checkbox marks well).
-- The prompt restricts the model to a single job: transcribe handwritten text and detect marks. No validation logic, no document classification — that stays in Stage A. This narrow scope is what makes it behave like a dedicated HTR (handwritten text recognition) network instead of a general extractor.
-- Falls back to Stage A's result if Stage B fails or times out — never blocks validation.
+## Root cause
 
-(If later the user wants a true dedicated HTR neural net like TrOCR or Google Document AI, it slots into Stage B without changing the rest of the pipeline. We'd add an API key via the secrets flow and swap the call site.)
+1. **Filename suffix dictionary is too narrow.** Tokens after the ID get joined and normalized: `"Proof of Address"` → `"proofofaddress"`. That key isn't in `SUFFIX_TO_DOCTYPE`, and `matchPartialSuffix` has no entry containing `"proof"` or `"address"`, so `docTypeHint` becomes `null`. The same gap will hit `"Bank Confirmation"`, `"Police Clearance"`, `"Income Tax Certificate"` (only matches by accident on `"tax"`), `"ID Copy"`, etc.
+2. **`matchPartialSuffix` is order-dependent**, not longest-match. `"taxcertificate"` matches `"tax"` first and short-circuits — fragile.
+3. **No content-based fallback when AI returns "Other"** and the filename gives no hint. The "Other" verdict stands even when the document body clearly says "Proof of Residence" or has a SAPS letterhead.
 
-**3. New tool schema for Stage B (`extract_handwriting`)**
+## What changes (only `supabase/functions/process-document/index.ts`)
 
-```text
-{
-  handwritten_name: string,
-  handwritten_surname: string,
-  handwritten_id_number: string,        // 13 digits if found
-  handwritten_dates: [{ label, value_iso }],
-  marks: [{ label, kind: "tick"|"cross"|"circle"|"none", confidence }],
-  signature_blocks: [{ label, present: bool, confidence }],
-  initials_per_page: [{ page, present: bool }],   // for BA / FTC
-  field_confidences: { name, surname, id_number, dates },
-  illegible_fields: [string]
-}
+### 1. Expand `SUFFIX_TO_DOCTYPE` with real-world phrases
+Add aliases observed in the logs and common admin variants. New entries:
+- `proofofaddress`, `proofofresidence`, `addressproof`, `residenceproof`, `utilitybill`, `municipalbill` → **Bank Letter** *(Capaciti's existing "proof of residence/address" slot — confirmed by question 1)*
+- `incometax`, `incometaxcertificate`, `sarsletter`, `taxnumberletter`, `irp5certificate` → **Tax Certificate**
+- `mieconsent`, `mieverification`, `mieclearance`, `backgroundcheck` → **MIE Verification**
+- `signedofferletter`, `offerofemployment`, `employmentoffer` → **Offer Letter**
+- `bankstatement`, `bankconfirmation`, `bankaccountconfirmation` → **Bank Letter**
+- `idcopy`, `idphoto`, `saidcopy`, `greenid`, `smartid`, `iddocument` → **Certified ID**
+- `policeclearance`, `saps`, `affidavitofunemployment` → **Unemployment Affidavit**
+- `matriccertificate`, `seniorcertificate`, `nsc`, `ieb` → **Qualification Matric**
+- `disabilitycertificate`, `disabilityconfirmation` → **PWDS Confirmation of Disability**
+- `socialmediaconsentform`, `mediaconsent`, `photographyconsent` → **Social Media Consent**
+- `cvresume`, `curriculumvitae` → **CV**
+- `capaciticonsent`, `capacitiagreement` → **Capaciti Declaration**
+- `fixedtermcontract`, `employmentftc` → **Employment Contract FTC**
+- `completioncertificate`, `trainingcompletion` → **Certificate of Completion**
+- `eea1employmentequity`, `employmentequityform` → **EEA1 Form**
+
+### 2. Replace `matchPartialSuffix` with longest-key-wins
+Iterate all keys, pick the **longest** key contained in the suffix. Guarantees `"taxcertificate"` beats `"tax"`, `"capacitideclaration"` beats `"declaration"`, `"proofofaddress"` beats `"address"` should both ever exist.
+
+### 3. Add Stage A2 — content-based reclassification
+After Stage A, if **all** of these hold:
+- `extracted.document_type === "Other"`
+- `filenameHints.docTypeHint` is `null`
+
+…run a focused second OpenRouter call using `google/gemini-2.5-pro` with a tight prompt:
+
+> "You previously classified this document as Other. Re-examine ONLY the visual headings, footers, form codes (EEA1, TCX, IRP5, BA), letterheads (SARS, SAPS, banks, training providers), and title text (Affidavit, Bank Letter, Proof of Address, Curriculum Vitae, Certificate of Completion). Pick the single best match from the 16 Capaciti types. Return Other ONLY if nothing recognisable exists. Provide `classification_evidence` (the exact text relied on) and `confidence` 0-100."
+
+Use a dedicated tool schema `reclassify_document` with `document_type` (same enum), `confidence`, `classification_evidence`. Apply the result when `confidence >= 70` AND not "Other":
+- Override `extracted.document_type`
+- Append check: `{ name: "Document type from content", status: "pass", detail: "Re-classified as <type> based on: <evidence>" }`
+
+If reclassify still says "Other" with high confidence, append a `warning` check `"No recognisable Capaciti document headings or form codes found"` so admins can see the AI looked.
+
+### 4. Tighten the Stage A system prompt
+Add one paragraph in `buildSystemPrompt`:
+
+> "Choose `Other` ONLY as a last resort. Before picking `Other`, scan for: (a) form codes (EEA1, TCX, IRP5, BA); (b) letterheads (SARS, SAPS, banks); (c) titles ("Affidavit", "Bank Letter", "Proof of Address/Residence", "Certificate of Completion", "Curriculum Vitae"); (d) signatory blocks ("Commissioner of Oaths"). If any point to one of the 16 Capaciti types, pick that type even when the filename gives no hint."
+
+### Resulting hierarchy
 ```
+Filename suffix (Stage A1)  ▶  Stage A AI  ▶  Stage A2 reclassify (if Other & no hint)  ▶  Stage B handwriting
+```
+Filename still wins for **name & ID**. Doc type now has a content-based safety net before falling back to "Other".
 
-**4. Reconciliation rules (added after Stage A + B complete)**
+## Out of scope
+- Assessment Tools system (untouched)
+- DB schema (no migration; results stay in existing `validation_details` JSON)
+- UI changes (the new check renders automatically in the existing checks list)
 
-- **Identity**: filename → handwriting → printed text → Gemini-extracted, in that priority. Existing `filenameHints` logic stays; handwriting becomes the second-priority source instead of falling straight to Gemini's free-form extraction.
-- **Form fields**: if Gemini's `extracted_info.X` is empty/Unknown but handwriting has it with confidence ≥ 70, use handwriting and add a `pass` check `"Field read from handwriting"`.
-- **Conflicts**: if both have a value and they differ on name / ID / date, add a `warning` check `"Handwriting vs printed/filename mismatch"` with both values in the detail. Never auto-fail.
-- **TCX Q1/Q2**: if `marks` for Q1/Q2 say `circle` around NO with confidence ≥ 70, mark those checks `pass` even if Gemini was uncertain.
-- **Signatures / initials**: handwriting's `signature_blocks` and `initials_per_page` override Gemini when confidence ≥ 70.
-- All low-confidence (< 70) handwriting reads are surfaced as warnings, never used to overwrite.
+## Files modified
+- `supabase/functions/process-document/index.ts`
+- `mem://features/validation-rules` — note expanded mapping & Stage A2 rule
+- `mem://tech/ai-stack` — note Stage A2 uses `google/gemini-2.5-pro`
 
-**5. Storage**
+## One clarifying question
 
-- Stage B output stored alongside Stage A in the existing `documents.validation_details` JSON column, under a new `handwriting` key. No DB migration required.
-- The reconciled `extracted_info` and `checks` arrays remain the source of truth for the rest of the app (CandidateModal, report PDF, scoring, grouping).
-
-**6. UI changes (Document Validation only)**
-
-- `src/components/CandidateModal.tsx`: add a collapsible "Handwriting recognition" panel under each document's checks list, rendered only when `validation_details.handwriting` exists. Shows transcribed fields + confidence chips. Reuses existing card / badge / collapsible primitives — no new design tokens.
-- No changes to upload flow, session list, report PDF, or settings UI.
-
-**7. Cost & latency**
-
-- Stage B adds one additional OpenRouter call per document. Runs in parallel with Stage A using `Promise.all` so end-to-end latency only grows by the difference between the two calls (≈ +0–3 s typical).
-- Async-mode path already exists; Stage B uses sync only — async webhook flow stays untouched for now.
-- Errors / 402 / 429 from Stage B are caught and logged; document still succeeds with Stage A results.
-
-### Out of Scope
-
-- Assessment Tools system — completely untouched.
-- Report PDF layout — unchanged (handwriting data flows through the existing `extracted_info`).
-- Bulk upload / folder upload — unchanged.
-- Database schema — no migration.
-- Adding a non-OpenRouter HTR provider (TrOCR, Google Document AI, AWS Textract) — can be a follow-up if Gemini-as-HTR proves insufficient in practice.
-
-### Files Touched
-
-- `supabase/functions/process-document/index.ts` — add Stage B call, handwriting tool schema, reconciliation logic, store under `validation_details.handwriting`.
-- `src/components/CandidateModal.tsx` — add "Handwriting recognition" panel.
-- `mem://features/validation-rules` — append a short note about the two-stage pipeline.
-- `mem://tech/ai-stack` — add a line about the handwriting pass.
-
-No changes to: assessment tools, upload modal, session detail mapping, report generators, settings, auth, DB schema.
+Capaciti's 16-type list does not contain a literal "Proof of Address" type. I'll ask which existing type these proof-of-residence documents should map to so the alias table is correct.
