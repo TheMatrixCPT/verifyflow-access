@@ -90,6 +90,7 @@ const SessionDetail = () => {
       policeStation: (d.validation_details as any)?.police_station || undefined,
       certificationAuthority: (d.validation_details as any)?.certification_authority || undefined,
       extractedInfo: (d.validation_details as any)?.extracted_info || undefined,
+      handwriting: (d.validation_details as any)?.handwriting || null,
     }));
 
     // Calculate score dynamically from checks: passed / total * 100

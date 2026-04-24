@@ -596,6 +596,253 @@ function extractToolCall(aiData: Record<string, any>) {
   return null;
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// Stage B: Handwriting Recognition (neural network pass)
+// ───────────────────────────────────────────────────────────────────────────
+const handwritingToolSchema = {
+  type: "function",
+  function: {
+    name: "extract_handwriting",
+    description: "Transcribe handwritten text and detect pen marks (ticks, crosses, circles, signatures, initials) on the document. Do NOT classify the document or do validation — only transcribe what is written/marked by hand.",
+    parameters: {
+      type: "object",
+      properties: {
+        handwritten_name: { type: "string", description: "Person's first/given name as written by hand. Empty string if not handwritten or illegible." },
+        handwritten_surname: { type: "string", description: "Person's surname as written by hand. Empty string if not handwritten or illegible." },
+        handwritten_id_number: { type: "string", description: "13-digit SA ID number as written by hand. Empty string if not handwritten or illegible." },
+        handwritten_dates: {
+          type: "array",
+          description: "Each handwritten date found on the document with its label",
+          items: {
+            type: "object",
+            properties: {
+              label: { type: "string", description: "Field label near the date (e.g. 'Sworn date', 'Signed on', 'Stamp date')" },
+              value_iso: { type: "string", description: "Date in YYYY-MM-DD format" }
+            },
+            required: ["label", "value_iso"]
+          }
+        },
+        marks: {
+          type: "array",
+          description: "Pen marks (ticks, crosses, circles) on checkboxes / multiple-choice fields",
+          items: {
+            type: "object",
+            properties: {
+              label: { type: "string", description: "Field label near the mark (e.g. 'TCX Q1 NO', 'EEA1 Race - African', 'Foreign National - No', 'Person with disability - Yes')" },
+              kind: { type: "string", enum: ["tick", "cross", "circle", "none"] },
+              confidence: { type: "number", description: "0-100" }
+            },
+            required: ["label", "kind", "confidence"]
+          }
+        },
+        signature_blocks: {
+          type: "array",
+          description: "Each named signature block on the document and whether a handwritten signature is present",
+          items: {
+            type: "object",
+            properties: {
+              label: { type: "string", description: "Block label (e.g. 'Beneficiary signature page 12', 'Commissioner of Oaths', 'Employee', 'Employer')" },
+              present: { type: "boolean" },
+              confidence: { type: "number" }
+            },
+            required: ["label", "present", "confidence"]
+          }
+        },
+        initials_per_page: {
+          type: "array",
+          description: "For multi-page documents requiring initials on every page (BA, FTC). One entry per page.",
+          items: {
+            type: "object",
+            properties: {
+              page: { type: "number" },
+              present: { type: "boolean" }
+            },
+            required: ["page", "present"]
+          }
+        },
+        field_confidences: {
+          type: "object",
+          properties: {
+            name: { type: "number" },
+            surname: { type: "number" },
+            id_number: { type: "number" },
+            dates: { type: "number" }
+          }
+        },
+        illegible_fields: {
+          type: "array",
+          items: { type: "string" },
+          description: "Labels of handwritten fields that were attempted but could not be read"
+        }
+      },
+      required: ["handwritten_name", "handwritten_surname", "handwritten_id_number", "handwritten_dates", "marks", "signature_blocks", "initials_per_page", "field_confidences", "illegible_fields"],
+      additionalProperties: false
+    }
+  }
+};
+
+const HANDWRITING_SYSTEM_PROMPT = `You are a dedicated Handwritten Text Recognition (HTR) neural network for South African HR documents.
+
+Your ONLY job: transcribe handwritten content and detect pen marks. You do NOT classify documents, do NOT do compliance validation, do NOT comment on layout. Just read the pen.
+
+Transcribe:
+- Handwritten first/given names and surnames into handwritten_name / handwritten_surname.
+- Handwritten 13-digit SA ID numbers into handwritten_id_number (digits only).
+- Every handwritten date with its nearby label into handwritten_dates (ISO YYYY-MM-DD).
+- Every checkbox / circle / tick / cross mark in the multiple-choice areas into marks. Use the field label printed next to the mark (e.g. "TCX Q1 NO", "EEA1 Race - African", "Foreign National - No", "Person with disability - Yes", "Gender - Male"). Set kind to whichever pen mark you actually see. confidence 0-100.
+- Every signature block with its label and whether a handwritten signature is present.
+- For multi-page Beneficiary Agreements and Employment Contracts, look at every page and report whether candidate initials are present on each page in initials_per_page.
+
+Rules:
+- Confidence must be honest: if the writing is messy, lower the confidence. Do NOT invent text.
+- If a handwritten field is attempted but unreadable, leave its value empty and add the label to illegible_fields.
+- Do not echo printed/typed text — only what is HANDWRITTEN or MARKED with a pen.
+- Read every page before deciding a field is missing.
+
+Respond using the extract_handwriting function. Be thorough.`;
+
+async function analyzeHandwriting(apiKey: string, fileUrl: string, fileName: string): Promise<any | null> {
+  try {
+    const base64 = await fetchFileAsBase64(fileUrl);
+    const mimeType = getMimeType(fileName);
+    const userContent = isPdfFile(fileName)
+      ? [
+          { type: "text", text: `Transcribe handwritten content and pen marks on this document (filename: "${fileName}"). Read every page.` },
+          { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}` } }
+        ]
+      : [
+          { type: "text", text: `Transcribe handwritten content and pen marks on this document (filename: "${fileName}").` },
+          { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}`, detail: "high" } }
+        ];
+
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": Deno.env.get("SUPABASE_URL") || "https://lovable.dev",
+        "X-Title": "CapaCiTi Handwriting Recognition",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-pro",
+        messages: [
+          { role: "system", content: HANDWRITING_SYSTEM_PROMPT },
+          { role: "user", content: userContent },
+        ],
+        tools: [handwritingToolSchema],
+        tool_choice: { type: "function", function: { name: "extract_handwriting" } },
+      }),
+    });
+
+    if (!response.ok) {
+      console.warn(`Handwriting pass failed (${response.status}); continuing without it.`);
+      return null;
+    }
+    const data = await response.json();
+    const tc = extractToolCall(data);
+    const args = tc?.function?.arguments || tc?.arguments;
+    if (!args) return null;
+    return JSON.parse(args);
+  } catch (e) {
+    console.warn("Handwriting pass threw, continuing without it:", e);
+    return null;
+  }
+}
+
+// Reconcile Stage B handwriting output with Stage A extraction.
+// Returns extra checks to append; mutates extracted in place for field promotions.
+function reconcileHandwriting(
+  extracted: any,
+  handwriting: any | null,
+): { name: string; status: string; detail: string }[] {
+  if (!handwriting) return [];
+  const extraChecks: { name: string; status: string; detail: string }[] = [];
+  const conf = handwriting.field_confidences || {};
+  const HIGH = 70;
+
+  // Promote handwritten name into extracted_info if Gemini left it blank
+  const hwFullName = [handwriting.handwritten_name, handwriting.handwritten_surname]
+    .filter((v) => typeof v === "string" && v.trim())
+    .join(" ")
+    .trim();
+  if (hwFullName) {
+    const existingName = (extracted.extracted_info?.full_name || "").trim();
+    if (!existingName) {
+      extracted.extracted_info = { ...(extracted.extracted_info || {}), full_name: hwFullName };
+      extraChecks.push({
+        name: "Field read from handwriting",
+        status: "pass",
+        detail: `Full name "${hwFullName}" recovered from handwriting pass (confidence ${Math.max(conf.name || 0, conf.surname || 0)}%).`,
+      });
+    } else {
+      const a = existingName.toLowerCase().replace(/\s+/g, "");
+      const b = hwFullName.toLowerCase().replace(/\s+/g, "");
+      if (a !== b && !a.includes(b) && !b.includes(a) && (conf.name || 0) >= HIGH) {
+        extraChecks.push({
+          name: "Handwriting vs printed/filename mismatch",
+          status: "warning",
+          detail: `Printed/extracted name "${existingName}" differs from handwritten "${hwFullName}". Please verify.`,
+        });
+      }
+    }
+  }
+
+  // Handwritten ID number
+  const hwId = (handwriting.handwritten_id_number || "").replace(/\D/g, "");
+  if (/^\d{13}$/.test(hwId)) {
+    const existingId = (extracted.extracted_id_number || extracted.extracted_info?.id_number || "").toString().replace(/\s/g, "");
+    if (!existingId || existingId.length !== 13) {
+      extracted.extracted_id_number = hwId;
+      extracted.extracted_info = { ...(extracted.extracted_info || {}), id_number: hwId };
+      extraChecks.push({
+        name: "Field read from handwriting",
+        status: "pass",
+        detail: `ID number "${hwId}" recovered from handwriting pass (confidence ${conf.id_number || 0}%).`,
+      });
+    } else if (existingId !== hwId && (conf.id_number || 0) >= HIGH) {
+      extraChecks.push({
+        name: "Handwriting vs printed/filename mismatch",
+        status: "warning",
+        detail: `Existing ID "${existingId}" differs from handwritten "${hwId}". Please verify.`,
+      });
+    }
+  }
+
+  // TCX Q1 / Q2 NO-circle confirmation
+  for (const m of handwriting.marks || []) {
+    const lbl = (m.label || "").toLowerCase();
+    if ((lbl.includes("q1") || lbl.includes("question 1")) && lbl.includes("no") && m.kind === "circle" && (m.confidence || 0) >= HIGH) {
+      extraChecks.push({ name: "TCX Q1 marked NO (handwriting)", status: "pass", detail: `Pen circle around NO detected (confidence ${m.confidence}%).` });
+    }
+    if ((lbl.includes("q2") || lbl.includes("question 2")) && lbl.includes("no") && m.kind === "circle" && (m.confidence || 0) >= HIGH) {
+      extraChecks.push({ name: "TCX Q2 marked NO (handwriting)", status: "pass", detail: `Pen circle around NO detected (confidence ${m.confidence}%).` });
+    }
+  }
+
+  // Low-confidence reads → warnings (informational, never fail)
+  const lowConf: string[] = [];
+  if (handwriting.handwritten_name && (conf.name || 0) < HIGH) lowConf.push(`name (${conf.name || 0}%)`);
+  if (handwriting.handwritten_surname && (conf.surname || 0) < HIGH) lowConf.push(`surname (${conf.surname || 0}%)`);
+  if (hwId && (conf.id_number || 0) < HIGH) lowConf.push(`ID number (${conf.id_number || 0}%)`);
+  if (lowConf.length > 0) {
+    extraChecks.push({
+      name: "Optional - Low-confidence handwriting read",
+      status: "warning",
+      detail: `Handwriting pass returned uncertain values for: ${lowConf.join(", ")}. Please verify visually.`,
+    });
+  }
+
+  if (Array.isArray(handwriting.illegible_fields) && handwriting.illegible_fields.length > 0) {
+    extraChecks.push({
+      name: "Optional - Illegible handwritten fields",
+      status: "warning",
+      detail: `Could not read: ${handwriting.illegible_fields.join(", ")}.`,
+    });
+  }
+
+  return extraChecks;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -697,9 +944,14 @@ serve(async (req) => {
       }
     }
 
-    // Sync mode with OpenRouter
-    console.log(`Using OpenRouter (sync, model: ${aiModel}) for document analysis`);
-    aiResponse = await analyzeWithOpenRouter(OPENROUTER_API_KEY, aiModel, systemPrompt, file_url, file_name, crossReferenceContext, filenameHints);
+    // Sync mode with OpenRouter — run Stage A (validation) and Stage B (handwriting) in parallel
+    console.log(`Using OpenRouter (sync, model: ${aiModel}) for document analysis + handwriting pass`);
+    const [aiResponseRes, handwritingRes] = await Promise.all([
+      analyzeWithOpenRouter(OPENROUTER_API_KEY, aiModel, systemPrompt, file_url, file_name, crossReferenceContext, filenameHints),
+      analyzeHandwriting(OPENROUTER_API_KEY, file_url, file_name),
+    ]);
+    aiResponse = aiResponseRes;
+    const handwriting = handwritingRes;
 
     if (!aiResponse.ok) {
       const status = aiResponse.status;
@@ -813,6 +1065,12 @@ serve(async (req) => {
 
     if (filenameOverrideChecks.length > 0) {
       extracted.checks = [...(extracted.checks || []), ...filenameOverrideChecks];
+    }
+
+    // ── Stage B reconciliation: handwriting recognition pass ──
+    const handwritingChecks = reconcileHandwriting(extracted, handwriting);
+    if (handwritingChecks.length > 0) {
+      extracted.checks = [...(extracted.checks || []), ...handwritingChecks];
     }
 
     // ── SA ID Structural Validation (Luhn checksum) ──
@@ -930,6 +1188,8 @@ serve(async (req) => {
         ai_provider: aiProvider,
         ai_model: aiModel,
         sa_id_validation: saIdValidation,
+        handwriting: handwriting || null,
+        handwriting_model: handwriting ? "google/gemini-2.5-pro" : null,
       },
       processed_at: new Date().toISOString(),
     }).eq("id", document_id);

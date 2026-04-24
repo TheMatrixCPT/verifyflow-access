@@ -1,43 +1,100 @@
+## Add Neural-Network Handwriting Recognition to Document Validation
 
+Strengthen the existing document validation pipeline with a dedicated handwriting recognition step powered by a vision neural network model. This complements (does not replace) the current Gemini-based extraction and the filename-wins identification logic. The Assessment Tools system is not touched.
 
-## Fix Report PDF: Question Cut-off & "Your Answer" Overlap
+### Why This Is Needed
 
-Two layout fixes to the assessment results report (`src/lib/generateAssessmentPdfs.ts`). The certificate, header, footer, summary card, and Assessment Tools data flow are not touched.
+Today the AI prompt asks Gemini to "treat handwritten text with the same rigor as printed text", but for many Capaciti documents (Affidavits, EEA1, TCX, PWDS, Declarations, BA initials, signature/date blocks) the model still misses or misreads pen-filled fields. We need a more deterministic neural-network pass focused specifically on handwriting + checkbox/tick/circle marks, then feed those results back into validation.
 
-### Problems Today
+### What Changes for the User
 
-1. **Questions get visually cut off / collide with the answer pill** — line-height (`5.5mm`) used in the height calc is tight for 11pt bold text, and there's only 2mm of vertical padding before the answer pill, so descenders of long wrapped questions overlap the pill above.
-2. **"Your answer" label overlaps the selected answer text** — the answer text wraps at `usableW - 30` (only 30mm reserved), while the right-aligned "Your answer" label at 9pt bold is ~18mm wide and sits flush at `usableW - 3`, leaving zero horizontal gap and overlapping multi-line answers.
+In the **Document Validation flow only**:
+- Each handwriting-heavy document now gets a small new section in the candidate modal: *"Handwriting recognition"* — shows the transcribed handwritten fields (name, ID, dates, ticks, signatures present/absent) the neural network read, with a confidence score per field.
+- When the neural-network reading conflicts with the filename or with Gemini's extraction, the document gets a `warning` check named `"Handwriting vs printed/filename mismatch"` with both readings shown — the admin decides.
+- "Unknown candidate" rate drops further because handwritten names on affidavits/EEA1 forms are now read by a model trained for handwriting, not just generic OCR.
+- TCX Question 1 / Question 2 NO-circle detection, EEA1 race/disability ticks, and signature-present detection become much more reliable.
 
-### Fix
+### Technical Plan
 
-**1. Move "Your answer" label OUT of the pill, above it (right-aligned)**
-- Render "Your answer" as a small purple caption on its own line, right-aligned, just above the pill.
-- The pill itself becomes a clean full-width row with bullet + answer text only — no collision possible regardless of answer length.
-- This also looks more like a proper "label → value" pattern.
+**1. Two-stage pipeline inside `process-document` edge function**
 
-**2. Give the answer text the full pill width**
-- Change wrap width from `usableW - 30` → `usableW - 16` (just bullet + padding reserved).
-- Long answers now use the entire pill width and wrap cleanly across multiple lines.
+```text
+Stage A (existing): Gemini 2.5 Flash via OpenRouter
+  → document_type, candidate_name, structured extracted_info, all checks
 
-**3. Fix question text height & spacing**
-- Increase question line-height from `5.5` → `6.2` so 11pt bold text never clips its descenders.
-- Increase gap between question and answer pill from `2` → `5`.
-- Increase gap between question blocks from `5` → `7`.
-- Increase pill internal vertical padding (height `lines * 5 + 3` → `lines * 5.4 + 5`) and shift text baseline down slightly so multi-line answers breathe.
+Stage B (new): Handwriting neural network pass (parallel, same base64 image)
+  → handwritten_fields: { name, surname, id_number, date, ticks[], signature_present }
+  → per-field confidence
 
-**4. Recompute `blockH`** with the new constants so page-break detection stays accurate (no question gets orphaned at the bottom of a page).
+Stage C (new): Reconciliation
+  → Filename wins on candidate identity (already implemented)
+  → Handwriting wins on hand-filled form fields when Gemini left them blank
+  → Disagreements surfaced as "warning" checks, never silent overwrites
+```
+
+**2. Model choice — use OpenRouter (keeps existing stack)**
+
+Per `mem://tech/ai-stack`, the project is "Exclusively OpenRouter". Add a second OpenRouter call to a vision model specifically prompted as a handwriting-recognition neural network:
+- Primary: `google/gemini-2.5-pro` with a tightly-scoped handwriting-only prompt + tool schema (it's the strongest multimodal reasoner available via OpenRouter and handles handwriting + checkbox marks well).
+- The prompt restricts the model to a single job: transcribe handwritten text and detect marks. No validation logic, no document classification — that stays in Stage A. This narrow scope is what makes it behave like a dedicated HTR (handwritten text recognition) network instead of a general extractor.
+- Falls back to Stage A's result if Stage B fails or times out — never blocks validation.
+
+(If later the user wants a true dedicated HTR neural net like TrOCR or Google Document AI, it slots into Stage B without changing the rest of the pipeline. We'd add an API key via the secrets flow and swap the call site.)
+
+**3. New tool schema for Stage B (`extract_handwriting`)**
+
+```text
+{
+  handwritten_name: string,
+  handwritten_surname: string,
+  handwritten_id_number: string,        // 13 digits if found
+  handwritten_dates: [{ label, value_iso }],
+  marks: [{ label, kind: "tick"|"cross"|"circle"|"none", confidence }],
+  signature_blocks: [{ label, present: bool, confidence }],
+  initials_per_page: [{ page, present: bool }],   // for BA / FTC
+  field_confidences: { name, surname, id_number, dates },
+  illegible_fields: [string]
+}
+```
+
+**4. Reconciliation rules (added after Stage A + B complete)**
+
+- **Identity**: filename → handwriting → printed text → Gemini-extracted, in that priority. Existing `filenameHints` logic stays; handwriting becomes the second-priority source instead of falling straight to Gemini's free-form extraction.
+- **Form fields**: if Gemini's `extracted_info.X` is empty/Unknown but handwriting has it with confidence ≥ 70, use handwriting and add a `pass` check `"Field read from handwriting"`.
+- **Conflicts**: if both have a value and they differ on name / ID / date, add a `warning` check `"Handwriting vs printed/filename mismatch"` with both values in the detail. Never auto-fail.
+- **TCX Q1/Q2**: if `marks` for Q1/Q2 say `circle` around NO with confidence ≥ 70, mark those checks `pass` even if Gemini was uncertain.
+- **Signatures / initials**: handwriting's `signature_blocks` and `initials_per_page` override Gemini when confidence ≥ 70.
+- All low-confidence (< 70) handwriting reads are surfaced as warnings, never used to overwrite.
+
+**5. Storage**
+
+- Stage B output stored alongside Stage A in the existing `documents.validation_details` JSON column, under a new `handwriting` key. No DB migration required.
+- The reconciled `extracted_info` and `checks` arrays remain the source of truth for the rest of the app (CandidateModal, report PDF, scoring, grouping).
+
+**6. UI changes (Document Validation only)**
+
+- `src/components/CandidateModal.tsx`: add a collapsible "Handwriting recognition" panel under each document's checks list, rendered only when `validation_details.handwriting` exists. Shows transcribed fields + confidence chips. Reuses existing card / badge / collapsible primitives — no new design tokens.
+- No changes to upload flow, session list, report PDF, or settings UI.
+
+**7. Cost & latency**
+
+- Stage B adds one additional OpenRouter call per document. Runs in parallel with Stage A using `Promise.all` so end-to-end latency only grows by the difference between the two calls (≈ +0–3 s typical).
+- Async-mode path already exists; Stage B uses sync only — async webhook flow stays untouched for now.
+- Errors / 402 / 429 from Stage B are caught and logged; document still succeeds with Stage A results.
 
 ### Out of Scope
-- Certificate PDF — unchanged.
-- Report header, footer, summary card, PASS/FAIL badge — unchanged.
-- Assessment parsing, scoring, candidate flow, Document Validation system — all untouched.
 
-### Technical Details
-- Constants updated inside the `respondent.answers.forEach` loop in `generateReport`.
-- "Your answer" label drawn at `marginX + usableW`, right-aligned, font 9pt bold purple, on a dedicated `y` line (~4mm tall) before the pill is drawn.
-- Pill height formula: `lines.length * 5.4 + 5` (was `lines.length * 5 + 3`).
-- Answer text baseline inside pill: `y + 4.2` (was `y + 3.5`) for better vertical centering.
-- Question wrap stays at `usableW`; only the line-height multiplier changes.
-- All changes are additive to vertical layout — no horizontal layout shift, no color/font/branding changes.
+- Assessment Tools system — completely untouched.
+- Report PDF layout — unchanged (handwriting data flows through the existing `extracted_info`).
+- Bulk upload / folder upload — unchanged.
+- Database schema — no migration.
+- Adding a non-OpenRouter HTR provider (TrOCR, Google Document AI, AWS Textract) — can be a follow-up if Gemini-as-HTR proves insufficient in practice.
 
+### Files Touched
+
+- `supabase/functions/process-document/index.ts` — add Stage B call, handwriting tool schema, reconciliation logic, store under `validation_details.handwriting`.
+- `src/components/CandidateModal.tsx` — add "Handwriting recognition" panel.
+- `mem://features/validation-rules` — append a short note about the two-stage pipeline.
+- `mem://tech/ai-stack` — add a line about the handwriting pass.
+
+No changes to: assessment tools, upload modal, session detail mapping, report generators, settings, auth, DB schema.
