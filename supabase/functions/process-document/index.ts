@@ -20,7 +20,9 @@ type FilenameHints = {
   matchedConvention: boolean;
 };
 
-// Map known filename suffix tokens to canonical document_type enum values
+// Map known filename suffix tokens to canonical document_type enum values.
+// NOTE: Keep multi-word/explicit aliases here. Order does not matter for the
+// matcher below — `matchPartialSuffix` always prefers the LONGEST key match.
 const SUFFIX_TO_DOCTYPE: Record<string, string> = {
   "ba": "Beneficiary Agreement",
   "beneficiaryagreement": "Beneficiary Agreement",
@@ -55,11 +57,20 @@ const SUFFIX_TO_DOCTYPE: Record<string, string> = {
   "taxcertificate": "Tax Certificate",
   "irp5": "Tax Certificate",
   "mie": "MIE Verification",
+  "mieverification": "MIE Verification",
+  "mieconsent": "MIE Verification",
+  "miecheck": "MIE Verification",
   "id": "Certified ID",
   "certifiedid": "Certified ID",
   "idcopy": "Certified ID",
   "iddocument": "Certified ID",
 };
+
+// Keys ≤3 chars are ambiguous as substrings ("id" inside "consider", "ba"
+// inside "bank") so we require a stricter match for them.
+const SHORT_SUFFIX_KEYS = new Set(
+  Object.keys(SUFFIX_TO_DOCTYPE).filter((k) => k.length <= 3),
+);
 
 // Split CamelCase/PascalCase into spaced words: "JohnDoe" -> "John Doe"
 function splitCamelCase(input: string): string {
@@ -69,11 +80,42 @@ function splitCamelCase(input: string): string {
     .replace(/\s+/g, " ");
 }
 
-function matchPartialSuffix(suffix: string): string | null {
+// Improved suffix matcher.
+// Strategy:
+//  1. Collect every key that appears in `suffix`.
+//  2. For SHORT keys (≤3 chars), require the key to appear as a standalone
+//     token (i.e. surrounded by non-letter boundaries in the original raw
+//     suffix, or be the entire suffix). This avoids false hits like
+//     "consider" → "id".
+//  3. Among remaining candidates, pick the LONGEST key. On tie, pick the one
+//     that starts LATEST in the suffix (last token wins — closest to the end
+//     of the filename, which is where the doc-type marker normally lives).
+function matchPartialSuffix(suffix: string, rawSuffix?: string): string | null {
+  const candidates: { key: string; val: string; pos: number }[] = [];
+  const boundaryRaw = (rawSuffix ?? suffix).toLowerCase();
+
   for (const [key, val] of Object.entries(SUFFIX_TO_DOCTYPE)) {
-    if (suffix.includes(key)) return val;
+    const pos = suffix.lastIndexOf(key);
+    if (pos === -1) continue;
+
+    if (SHORT_SUFFIX_KEYS.has(key)) {
+      // Require the short key to appear as a standalone token in the raw
+      // (un-normalised) suffix — bounded by start/end or non-alphanumerics.
+      const tokenRe = new RegExp(`(^|[^a-z0-9])${key}([^a-z0-9]|$)`, "i");
+      if (!tokenRe.test(boundaryRaw)) continue;
+    }
+
+    candidates.push({ key, val, pos });
   }
-  return null;
+
+  if (candidates.length === 0) return null;
+
+  candidates.sort((a, b) => {
+    if (b.key.length !== a.key.length) return b.key.length - a.key.length;
+    return b.pos - a.pos; // later position wins on length tie
+  });
+
+  return candidates[0].val;
 }
 
 // Parse filename of the form name_surname_IDno_doctype, namesurname_IDno_doctype,
