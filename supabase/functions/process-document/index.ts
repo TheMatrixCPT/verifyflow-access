@@ -1099,14 +1099,25 @@ serve(async (req) => {
       }
     }
 
-    // If AI returned "Other" but filename has a recognised doc type suffix, prefer the filename type
-    if (filenameHints.docTypeHint && (extracted.document_type === "Other" || !extracted.document_type)) {
-      filenameOverrideChecks.push({
-        name: "Document type from filename",
-        status: "pass",
-        detail: `Document type inferred from filename suffix as "${filenameHints.docTypeHint}".`,
-      });
-      extracted.document_type = filenameHints.docTypeHint;
+    // If AI returned "Other" but filename has a recognised doc type suffix, prefer the filename type.
+    // If AI confidently identified a DIFFERENT known doc type, trust the AI and downgrade the
+    // filename hint to an informational note rather than overriding (avoids the false
+    // "Filename vs content mismatch" warnings caused by ambiguous fuzzy suffix matches).
+    if (filenameHints.docTypeHint) {
+      if (extracted.document_type === "Other" || !extracted.document_type) {
+        filenameOverrideChecks.push({
+          name: "Document type from filename",
+          status: "pass",
+          detail: `Document type inferred from filename suffix as "${filenameHints.docTypeHint}".`,
+        });
+        extracted.document_type = filenameHints.docTypeHint;
+      } else if (extracted.document_type !== filenameHints.docTypeHint) {
+        filenameOverrideChecks.push({
+          name: "Filename hint note",
+          status: "pass",
+          detail: `Filename suggested "${filenameHints.docTypeHint}" but document content was identified as "${extracted.document_type}". Trusting document content.`,
+        });
+      }
     }
 
     if (filenameOverrideChecks.length > 0) {
