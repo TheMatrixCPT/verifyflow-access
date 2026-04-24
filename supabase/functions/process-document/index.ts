@@ -20,45 +20,110 @@ type FilenameHints = {
   matchedConvention: boolean;
 };
 
-// Map known filename suffix tokens to canonical document_type enum values
+// Map known filename suffix tokens to canonical document_type enum values.
+// Keys are lowercase, alphanumeric only (no spaces/punctuation). Order does not
+// matter — matchPartialSuffix uses longest-key-wins to resolve ambiguity.
 const SUFFIX_TO_DOCTYPE: Record<string, string> = {
+  // Beneficiary Agreement
   "ba": "Beneficiary Agreement",
   "beneficiaryagreement": "Beneficiary Agreement",
+  // Employment Contract FTC
   "ftc": "Employment Contract FTC",
   "employmentcontract": "Employment Contract FTC",
+  "fixedtermcontract": "Employment Contract FTC",
+  "employmentftc": "Employment Contract FTC",
+  // Offer Letter
   "offerletter": "Offer Letter",
+  "signedofferletter": "Offer Letter",
+  "offerofemployment": "Offer Letter",
+  "employmentoffer": "Offer Letter",
   "offer": "Offer Letter",
+  // Certificate of Completion
   "completionoftraining": "Certificate of Completion",
+  "completioncertificate": "Certificate of Completion",
+  "trainingcompletion": "Certificate of Completion",
   "completion": "Certificate of Completion",
   "certificate": "Certificate of Completion",
+  // Bank Letter (also used for proof-of-address / proof-of-residence)
   "bankletter": "Bank Letter",
+  "bankconfirmation": "Bank Letter",
+  "bankaccountconfirmation": "Bank Letter",
+  "bankstatement": "Bank Letter",
   "bank": "Bank Letter",
+  "proofofaddress": "Bank Letter",
+  "proofofresidence": "Bank Letter",
+  "addressproof": "Bank Letter",
+  "residenceproof": "Bank Letter",
+  "utilitybill": "Bank Letter",
+  "municipalbill": "Bank Letter",
+  // TCX
   "tcx": "TCX Unemployment Affidavit",
+  // Unemployment Affidavit
   "unemploymentaffidavit": "Unemployment Affidavit",
+  "affidavitofunemployment": "Unemployment Affidavit",
+  "policeclearance": "Unemployment Affidavit",
+  "saps": "Unemployment Affidavit",
   "affidavit": "Unemployment Affidavit",
+  // EEA1 Form
   "eea1": "EEA1 Form",
   "eea1form": "EEA1 Form",
+  "eea1employmentequity": "EEA1 Form",
+  "employmentequityform": "EEA1 Form",
+  // PWDS Confirmation of Disability
   "pwd": "PWDS Confirmation of Disability",
   "pwds": "PWDS Confirmation of Disability",
   "disability": "PWDS Confirmation of Disability",
+  "disabilitycertificate": "PWDS Confirmation of Disability",
+  "disabilityconfirmation": "PWDS Confirmation of Disability",
+  // Social Media Consent
   "socialmediaconsent": "Social Media Consent",
+  "socialmediaconsentform": "Social Media Consent",
+  "mediaconsent": "Social Media Consent",
+  "photographyconsent": "Social Media Consent",
   "socialmedia": "Social Media Consent",
   "consent": "Social Media Consent",
+  // CV
   "cv": "CV",
+  "cvresume": "CV",
+  "curriculumvitae": "CV",
   "resume": "CV",
+  // Capaciti Declaration
   "declaration": "Capaciti Declaration",
   "capacitideclaration": "Capaciti Declaration",
+  "capaciticonsent": "Capaciti Declaration",
+  "capacitiagreement": "Capaciti Declaration",
+  // Qualification / Matric
   "matric": "Qualification Matric",
+  "matriccertificate": "Qualification Matric",
+  "seniorcertificate": "Qualification Matric",
+  "nsc": "Qualification Matric",
+  "ieb": "Qualification Matric",
   "qualification": "Qualification Matric",
+  // Tax Certificate
   "tax": "Tax Certificate",
   "taxnumber": "Tax Certificate",
   "taxcertificate": "Tax Certificate",
+  "incometax": "Tax Certificate",
+  "incometaxcertificate": "Tax Certificate",
+  "sarsletter": "Tax Certificate",
+  "taxnumberletter": "Tax Certificate",
   "irp5": "Tax Certificate",
+  "irp5certificate": "Tax Certificate",
+  // MIE Verification
   "mie": "MIE Verification",
+  "mieconsent": "MIE Verification",
+  "mieverification": "MIE Verification",
+  "mieclearance": "MIE Verification",
+  "backgroundcheck": "MIE Verification",
+  // Certified ID
   "id": "Certified ID",
   "certifiedid": "Certified ID",
   "idcopy": "Certified ID",
   "iddocument": "Certified ID",
+  "idphoto": "Certified ID",
+  "saidcopy": "Certified ID",
+  "greenid": "Certified ID",
+  "smartid": "Certified ID",
 };
 
 // Split CamelCase/PascalCase into spaced words: "JohnDoe" -> "John Doe"
@@ -70,10 +135,17 @@ function splitCamelCase(input: string): string {
 }
 
 function matchPartialSuffix(suffix: string): string | null {
+  // Longest-key-wins: prevents short keys (e.g. "tax") from short-circuiting
+  // longer, more specific keys (e.g. "taxcertificate", "incometaxcertificate").
+  let bestKey = "";
+  let bestVal: string | null = null;
   for (const [key, val] of Object.entries(SUFFIX_TO_DOCTYPE)) {
-    if (suffix.includes(key)) return val;
+    if (suffix.includes(key) && key.length > bestKey.length) {
+      bestKey = key;
+      bestVal = val;
+    }
   }
-  return null;
+  return bestVal;
 }
 
 // Parse filename of the form name_surname_IDno_doctype, namesurname_IDno_doctype,
@@ -520,7 +592,7 @@ async function buildUserContent(fileUrl: string, fileName: string, crossReferenc
     ? `FILENAME HINTS (authoritative for identification — admin-named): The filename suggests ${filenameHintParts.join(", ")}. Use these as your primary signal for candidate_name, extracted_id_number, and document_type. Confirm them against the actual document content; if the document content clearly contradicts the filename, still extract what the document says but flag the mismatch in your summary. Filename wins on conflict for candidate identification.`
     : `FILENAME HINTS: Could not parse a recognised pattern from "${fileName}". Identify the candidate and document type from content alone.`;
 
-  const textPrompt = `Analyze this document and validate it thoroughly. Filename: "${fileName}". ${filenamePrompt} ${crossReferencePrompt} Check all pages before deciding anything is missing. Do not stop at the first pages of a multi-page document. Read pen marks, ticks, handwritten selections, and check boxes carefully because they contain important answers. Many forms are filled in by hand — transcribe handwritten names, IDs, dates and signatures with the same care as printed text. Remember to extract stamp dates, police station names, and certification authority details even when stamps overlap words. For employment equity forms, treat the nationality answer as Yes or No: No means South African, Yes means foreign national. If foreign national is marked yes, extract the acquired date of nationality, residence date, or permit-related date into extracted_info.foreign_national_support_date. For contracts, page 10 employee details is an information page and does not require employee or employer signatures. Some contracts require only the employee signature while others require both employee and employer signatures, so decide from the actual signature blocks and wording on the relevant signature page. For disability and proof-of-address documents, do not require Capaciti formatting if the core identifying information and stamps/signatures are present. If the filename or readable contents clearly indicate MIE verification, a course or training completion certificate, or another listed supporting document type, classify it using that specific document_type instead of "Other". For unfamiliar documents, still extract all readable information and verify candidate name, surname, and ID number where present. Mark non-required missing stamp or certification findings as warning checks prefixed with "Optional -". Respond using the extract_document_info function. Be thorough in your validation checks.`;
+  const textPrompt = `Analyze this document and validate it thoroughly. Filename: "${fileName}". ${filenamePrompt} ${crossReferencePrompt} Check all pages before deciding anything is missing. Do not stop at the first pages of a multi-page document. Read pen marks, ticks, handwritten selections, and check boxes carefully because they contain important answers. Many forms are filled in by hand — transcribe handwritten names, IDs, dates and signatures with the same care as printed text. Remember to extract stamp dates, police station names, and certification authority details even when stamps overlap words. For employment equity forms, treat the nationality answer as Yes or No: No means South African, Yes means foreign national. If foreign national is marked yes, extract the acquired date of nationality, residence date, or permit-related date into extracted_info.foreign_national_support_date. For contracts, page 10 employee details is an information page and does not require employee or employer signatures. Some contracts require only the employee signature while others require both employee and employer signatures, so decide from the actual signature blocks and wording on the relevant signature page. For disability and proof-of-address documents, do not require Capaciti formatting if the core identifying information and stamps/signatures are present. If the filename or readable contents clearly indicate MIE verification, a course or training completion certificate, or another listed supporting document type, classify it using that specific document_type instead of "Other". CHOOSE "Other" ONLY AS A LAST RESORT. Before picking "Other", scan the document for: (a) form codes such as EEA1, TCX, IRP5, BA; (b) letterheads (SARS, SAPS, banks, municipalities, training providers); (c) titles like "Affidavit", "Bank Letter", "Proof of Address", "Proof of Residence", "Curriculum Vitae", "Certificate of Completion", "Matric Certificate", "Senior Certificate"; (d) signatory blocks ("Commissioner of Oaths"). A "Proof of Address" or "Proof of Residence" letter (bank, municipality, traffic department, SAPS) MUST be classified as "Bank Letter" — never "Other". If any of these point to one of the 16 Capaciti types, pick that type even when the filename gives no hint. For unfamiliar documents, still extract all readable information and verify candidate name, surname, and ID number where present. Mark non-required missing stamp or certification findings as warning checks prefixed with "Optional -". Respond using the extract_document_info function. Be thorough in your validation checks.`;
   
   try {
     const base64 = await fetchFileAsBase64(fileUrl);
@@ -843,6 +915,112 @@ function reconcileHandwriting(
   return extraChecks;
 }
 
+// Canonical doc-type list mirrored from extract_document_info schema.
+const CAPACITI_DOC_TYPES = [
+  "Certified ID",
+  "Unemployment Affidavit",
+  "EEA1 Form",
+  "PWDS Confirmation of Disability",
+  "Social Media Consent",
+  "Beneficiary Agreement",
+  "Offer Letter",
+  "Employment Contract FTC",
+  "Certificate of Completion",
+  "MIE Verification",
+  "Bank Letter",
+  "TCX Unemployment Affidavit",
+  "CV",
+  "Capaciti Declaration",
+  "Qualification Matric",
+  "Tax Certificate",
+  "Other",
+] as const;
+
+const reclassifyToolSchema = {
+  type: "function",
+  function: {
+    name: "reclassify_document",
+    description: "Re-examine a previously unclassified document and pick the best Capaciti document type from headings, footers, form codes, letterheads, and titles only.",
+    parameters: {
+      type: "object",
+      properties: {
+        document_type: { type: "string", enum: [...CAPACITI_DOC_TYPES] },
+        confidence: { type: "number", description: "Confidence 0-100 in the chosen type." },
+        classification_evidence: { type: "string", description: "Exact text (heading, form code, letterhead, title) used to make the decision. Empty if none found." },
+      },
+      required: ["document_type", "confidence", "classification_evidence"],
+      additionalProperties: false,
+    },
+  },
+};
+
+const RECLASSIFY_SYSTEM_PROMPT = `You are a Capaciti HR document classifier. The previous pass returned "Other" for this document. Re-examine the document and pick the single best match from the 16 Capaciti document types.
+
+Look ONLY at strong identifying signals:
+- Form codes / IDs printed on the page (EEA1, TCX, IRP5, BA)
+- Letterheads (SARS, SAPS, banks, municipalities, traffic department, training providers, Capaciti)
+- Document titles and headings ("Affidavit", "Bank Letter", "Proof of Address", "Proof of Residence", "Curriculum Vitae", "Certificate of Completion", "Matric Certificate", "Senior Certificate", "Beneficiary Agreement", "Employment Contract", "Offer Letter", "Confirmation of Disability", "Social Media Consent")
+- Signatory blocks ("Commissioner of Oaths", "SAPS")
+
+Mapping rules:
+- "Proof of Address" / "Proof of Residence" letters from a bank, municipality, traffic department, or SAPS → "Bank Letter".
+- Police clearance / SAPS unemployment affidavit → "Unemployment Affidavit".
+- IRP5 / SARS tax number letter / income tax certificate → "Tax Certificate".
+- MIE consent / background check → "MIE Verification".
+- Matric / Senior Certificate / NSC / IEB → "Qualification Matric".
+
+Return "Other" ONLY if you genuinely cannot find any heading, form code, letterhead, or title that maps to one of the 16 types. Provide classification_evidence (the exact text relied on) and a confidence 0-100. Read every page.
+
+Respond using the reclassify_document function.`;
+
+async function reclassifyDocument(apiKey: string, fileUrl: string, fileName: string): Promise<{ document_type: string; confidence: number; classification_evidence: string } | null> {
+  try {
+    const base64 = await fetchFileAsBase64(fileUrl);
+    const mimeType = getMimeType(fileName);
+    const userContent = isPdfFile(fileName)
+      ? [
+          { type: "text", text: `Re-classify this document (filename: "${fileName}"). Read every page and inspect titles, form codes, letterheads, and signatory blocks.` },
+          { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}` } },
+        ]
+      : [
+          { type: "text", text: `Re-classify this document (filename: "${fileName}"). Inspect titles, form codes, letterheads, and signatory blocks.` },
+          { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}`, detail: "high" } },
+        ];
+
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": Deno.env.get("SUPABASE_URL") || "https://lovable.dev",
+        "X-Title": "CapaCiTi Document Re-Classification",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-pro",
+        messages: [
+          { role: "system", content: RECLASSIFY_SYSTEM_PROMPT },
+          { role: "user", content: userContent },
+        ],
+        tools: [reclassifyToolSchema],
+        tool_choice: { type: "function", function: { name: "reclassify_document" } },
+      }),
+    });
+
+    if (!response.ok) {
+      console.warn(`Reclassify pass failed (${response.status}); leaving document_type as Other.`);
+      return null;
+    }
+    const data = await response.json();
+    const tc = extractToolCall(data);
+    const args = tc?.function?.arguments || tc?.arguments;
+    if (!args) return null;
+    return JSON.parse(args);
+  } catch (e) {
+    console.warn("Reclassify pass threw, leaving document_type as Other:", e);
+    return null;
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -1061,6 +1239,36 @@ serve(async (req) => {
         detail: `Document type inferred from filename suffix as "${filenameHints.docTypeHint}".`,
       });
       extracted.document_type = filenameHints.docTypeHint;
+    }
+
+    // ── Stage A2: content-based reclassification when AI said "Other" and filename gave no hint ──
+    if (
+      (extracted.document_type === "Other" || !extracted.document_type) &&
+      !filenameHints.docTypeHint
+    ) {
+      console.log(`Stage A2: running content-based reclassification for "${file_name}"`);
+      const reclassified = await reclassifyDocument(OPENROUTER_API_KEY, file_url, file_name);
+      if (reclassified) {
+        const conf = typeof reclassified.confidence === "number" ? reclassified.confidence : 0;
+        const newType = (reclassified.document_type || "").trim();
+        const evidence = (reclassified.classification_evidence || "").trim();
+        if (newType && newType !== "Other" && conf >= 70) {
+          extracted.document_type = newType;
+          filenameOverrideChecks.push({
+            name: "Document type from content",
+            status: "pass",
+            detail: `Re-classified as "${newType}" (confidence ${conf}%) based on document content${evidence ? `: "${evidence.slice(0, 200)}"` : ""}.`,
+          });
+        } else {
+          filenameOverrideChecks.push({
+            name: "Document type unrecognised",
+            status: "warning",
+            detail: evidence
+              ? `No recognised Capaciti document headings or form codes found. Re-classification evidence: "${evidence.slice(0, 200)}".`
+              : `No recognised Capaciti document headings or form codes found. Document remains "Other".`,
+          });
+        }
+      }
     }
 
     if (filenameOverrideChecks.length > 0) {
