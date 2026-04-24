@@ -915,6 +915,112 @@ function reconcileHandwriting(
   return extraChecks;
 }
 
+// Canonical doc-type list mirrored from extract_document_info schema.
+const CAPACITI_DOC_TYPES = [
+  "Certified ID",
+  "Unemployment Affidavit",
+  "EEA1 Form",
+  "PWDS Confirmation of Disability",
+  "Social Media Consent",
+  "Beneficiary Agreement",
+  "Offer Letter",
+  "Employment Contract FTC",
+  "Certificate of Completion",
+  "MIE Verification",
+  "Bank Letter",
+  "TCX Unemployment Affidavit",
+  "CV",
+  "Capaciti Declaration",
+  "Qualification Matric",
+  "Tax Certificate",
+  "Other",
+] as const;
+
+const reclassifyToolSchema = {
+  type: "function",
+  function: {
+    name: "reclassify_document",
+    description: "Re-examine a previously unclassified document and pick the best Capaciti document type from headings, footers, form codes, letterheads, and titles only.",
+    parameters: {
+      type: "object",
+      properties: {
+        document_type: { type: "string", enum: [...CAPACITI_DOC_TYPES] },
+        confidence: { type: "number", description: "Confidence 0-100 in the chosen type." },
+        classification_evidence: { type: "string", description: "Exact text (heading, form code, letterhead, title) used to make the decision. Empty if none found." },
+      },
+      required: ["document_type", "confidence", "classification_evidence"],
+      additionalProperties: false,
+    },
+  },
+};
+
+const RECLASSIFY_SYSTEM_PROMPT = `You are a Capaciti HR document classifier. The previous pass returned "Other" for this document. Re-examine the document and pick the single best match from the 16 Capaciti document types.
+
+Look ONLY at strong identifying signals:
+- Form codes / IDs printed on the page (EEA1, TCX, IRP5, BA)
+- Letterheads (SARS, SAPS, banks, municipalities, traffic department, training providers, Capaciti)
+- Document titles and headings ("Affidavit", "Bank Letter", "Proof of Address", "Proof of Residence", "Curriculum Vitae", "Certificate of Completion", "Matric Certificate", "Senior Certificate", "Beneficiary Agreement", "Employment Contract", "Offer Letter", "Confirmation of Disability", "Social Media Consent")
+- Signatory blocks ("Commissioner of Oaths", "SAPS")
+
+Mapping rules:
+- "Proof of Address" / "Proof of Residence" letters from a bank, municipality, traffic department, or SAPS → "Bank Letter".
+- Police clearance / SAPS unemployment affidavit → "Unemployment Affidavit".
+- IRP5 / SARS tax number letter / income tax certificate → "Tax Certificate".
+- MIE consent / background check → "MIE Verification".
+- Matric / Senior Certificate / NSC / IEB → "Qualification Matric".
+
+Return "Other" ONLY if you genuinely cannot find any heading, form code, letterhead, or title that maps to one of the 16 types. Provide classification_evidence (the exact text relied on) and a confidence 0-100. Read every page.
+
+Respond using the reclassify_document function.`;
+
+async function reclassifyDocument(apiKey: string, fileUrl: string, fileName: string): Promise<{ document_type: string; confidence: number; classification_evidence: string } | null> {
+  try {
+    const base64 = await fetchFileAsBase64(fileUrl);
+    const mimeType = getMimeType(fileName);
+    const userContent = isPdfFile(fileName)
+      ? [
+          { type: "text", text: `Re-classify this document (filename: "${fileName}"). Read every page and inspect titles, form codes, letterheads, and signatory blocks.` },
+          { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}` } },
+        ]
+      : [
+          { type: "text", text: `Re-classify this document (filename: "${fileName}"). Inspect titles, form codes, letterheads, and signatory blocks.` },
+          { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}`, detail: "high" } },
+        ];
+
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": Deno.env.get("SUPABASE_URL") || "https://lovable.dev",
+        "X-Title": "CapaCiTi Document Re-Classification",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-pro",
+        messages: [
+          { role: "system", content: RECLASSIFY_SYSTEM_PROMPT },
+          { role: "user", content: userContent },
+        ],
+        tools: [reclassifyToolSchema],
+        tool_choice: { type: "function", function: { name: "reclassify_document" } },
+      }),
+    });
+
+    if (!response.ok) {
+      console.warn(`Reclassify pass failed (${response.status}); leaving document_type as Other.`);
+      return null;
+    }
+    const data = await response.json();
+    const tc = extractToolCall(data);
+    const args = tc?.function?.arguments || tc?.arguments;
+    if (!args) return null;
+    return JSON.parse(args);
+  } catch (e) {
+    console.warn("Reclassify pass threw, leaving document_type as Other:", e);
+    return null;
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
