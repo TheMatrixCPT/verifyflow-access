@@ -147,8 +147,12 @@ function parseFilename(fileName: string): FilenameHints {
     const nameTokens = tokens.slice(0, idTokenIndex);
     result.candidateName = splitCamelCase(nameTokens.join(" ")).trim() || null;
     if (idTokenIndex + 1 < tokens.length) {
-      const suffixRaw = tokens.slice(idTokenIndex + 1).join("").toLowerCase().replace(/[^a-z0-9]/g, "");
-      result.docTypeHint = SUFFIX_TO_DOCTYPE[suffixRaw] || matchPartialSuffix(suffixRaw);
+      // Preserve separators for boundary checks on short keys
+      const suffixWithBoundaries = tokens.slice(idTokenIndex + 1).join(" ").toLowerCase();
+      const suffixRaw = suffixWithBoundaries.replace(/[^a-z0-9]/g, "");
+      result.docTypeHint =
+        SUFFIX_TO_DOCTYPE[suffixRaw] ||
+        matchPartialSuffix(suffixRaw, suffixWithBoundaries);
     }
     result.matchedConvention = !!(result.candidateName && result.idNumber);
   } else if (idTokenIndex === -1) {
