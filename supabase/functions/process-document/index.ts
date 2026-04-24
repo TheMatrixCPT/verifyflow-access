@@ -1188,6 +1188,8 @@ serve(async (req) => {
         ai_provider: aiProvider,
         ai_model: aiModel,
         sa_id_validation: saIdValidation,
+        handwriting: handwriting || null,
+        handwriting_model: handwriting ? "google/gemini-2.5-pro" : null,
       },
       processed_at: new Date().toISOString(),
     }).eq("id", document_id);
