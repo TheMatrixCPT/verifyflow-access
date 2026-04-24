@@ -135,10 +135,17 @@ function splitCamelCase(input: string): string {
 }
 
 function matchPartialSuffix(suffix: string): string | null {
+  // Longest-key-wins: prevents short keys (e.g. "tax") from short-circuiting
+  // longer, more specific keys (e.g. "taxcertificate", "incometaxcertificate").
+  let bestKey = "";
+  let bestVal: string | null = null;
   for (const [key, val] of Object.entries(SUFFIX_TO_DOCTYPE)) {
-    if (suffix.includes(key)) return val;
+    if (suffix.includes(key) && key.length > bestKey.length) {
+      bestKey = key;
+      bestVal = val;
+    }
   }
-  return null;
+  return bestVal;
 }
 
 // Parse filename of the form name_surname_IDno_doctype, namesurname_IDno_doctype,
