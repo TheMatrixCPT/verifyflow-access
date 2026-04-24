@@ -20,45 +20,110 @@ type FilenameHints = {
   matchedConvention: boolean;
 };
 
-// Map known filename suffix tokens to canonical document_type enum values
+// Map known filename suffix tokens to canonical document_type enum values.
+// Keys are lowercase, alphanumeric only (no spaces/punctuation). Order does not
+// matter — matchPartialSuffix uses longest-key-wins to resolve ambiguity.
 const SUFFIX_TO_DOCTYPE: Record<string, string> = {
+  // Beneficiary Agreement
   "ba": "Beneficiary Agreement",
   "beneficiaryagreement": "Beneficiary Agreement",
+  // Employment Contract FTC
   "ftc": "Employment Contract FTC",
   "employmentcontract": "Employment Contract FTC",
+  "fixedtermcontract": "Employment Contract FTC",
+  "employmentftc": "Employment Contract FTC",
+  // Offer Letter
   "offerletter": "Offer Letter",
+  "signedofferletter": "Offer Letter",
+  "offerofemployment": "Offer Letter",
+  "employmentoffer": "Offer Letter",
   "offer": "Offer Letter",
+  // Certificate of Completion
   "completionoftraining": "Certificate of Completion",
+  "completioncertificate": "Certificate of Completion",
+  "trainingcompletion": "Certificate of Completion",
   "completion": "Certificate of Completion",
   "certificate": "Certificate of Completion",
+  // Bank Letter (also used for proof-of-address / proof-of-residence)
   "bankletter": "Bank Letter",
+  "bankconfirmation": "Bank Letter",
+  "bankaccountconfirmation": "Bank Letter",
+  "bankstatement": "Bank Letter",
   "bank": "Bank Letter",
+  "proofofaddress": "Bank Letter",
+  "proofofresidence": "Bank Letter",
+  "addressproof": "Bank Letter",
+  "residenceproof": "Bank Letter",
+  "utilitybill": "Bank Letter",
+  "municipalbill": "Bank Letter",
+  // TCX
   "tcx": "TCX Unemployment Affidavit",
+  // Unemployment Affidavit
   "unemploymentaffidavit": "Unemployment Affidavit",
+  "affidavitofunemployment": "Unemployment Affidavit",
+  "policeclearance": "Unemployment Affidavit",
+  "saps": "Unemployment Affidavit",
   "affidavit": "Unemployment Affidavit",
+  // EEA1 Form
   "eea1": "EEA1 Form",
   "eea1form": "EEA1 Form",
+  "eea1employmentequity": "EEA1 Form",
+  "employmentequityform": "EEA1 Form",
+  // PWDS Confirmation of Disability
   "pwd": "PWDS Confirmation of Disability",
   "pwds": "PWDS Confirmation of Disability",
   "disability": "PWDS Confirmation of Disability",
+  "disabilitycertificate": "PWDS Confirmation of Disability",
+  "disabilityconfirmation": "PWDS Confirmation of Disability",
+  // Social Media Consent
   "socialmediaconsent": "Social Media Consent",
+  "socialmediaconsentform": "Social Media Consent",
+  "mediaconsent": "Social Media Consent",
+  "photographyconsent": "Social Media Consent",
   "socialmedia": "Social Media Consent",
   "consent": "Social Media Consent",
+  // CV
   "cv": "CV",
+  "cvresume": "CV",
+  "curriculumvitae": "CV",
   "resume": "CV",
+  // Capaciti Declaration
   "declaration": "Capaciti Declaration",
   "capacitideclaration": "Capaciti Declaration",
+  "capaciticonsent": "Capaciti Declaration",
+  "capacitiagreement": "Capaciti Declaration",
+  // Qualification / Matric
   "matric": "Qualification Matric",
+  "matriccertificate": "Qualification Matric",
+  "seniorcertificate": "Qualification Matric",
+  "nsc": "Qualification Matric",
+  "ieb": "Qualification Matric",
   "qualification": "Qualification Matric",
+  // Tax Certificate
   "tax": "Tax Certificate",
   "taxnumber": "Tax Certificate",
   "taxcertificate": "Tax Certificate",
+  "incometax": "Tax Certificate",
+  "incometaxcertificate": "Tax Certificate",
+  "sarsletter": "Tax Certificate",
+  "taxnumberletter": "Tax Certificate",
   "irp5": "Tax Certificate",
+  "irp5certificate": "Tax Certificate",
+  // MIE Verification
   "mie": "MIE Verification",
+  "mieconsent": "MIE Verification",
+  "mieverification": "MIE Verification",
+  "mieclearance": "MIE Verification",
+  "backgroundcheck": "MIE Verification",
+  // Certified ID
   "id": "Certified ID",
   "certifiedid": "Certified ID",
   "idcopy": "Certified ID",
   "iddocument": "Certified ID",
+  "idphoto": "Certified ID",
+  "saidcopy": "Certified ID",
+  "greenid": "Certified ID",
+  "smartid": "Certified ID",
 };
 
 // Split CamelCase/PascalCase into spaced words: "JohnDoe" -> "John Doe"
