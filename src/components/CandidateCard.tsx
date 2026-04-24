@@ -35,6 +35,7 @@ export interface DocumentData {
   policeStation?: string;
   certificationAuthority?: string;
   extractedInfo?: Record<string, any>;
+  handwriting?: Record<string, any> | null;
 }
 
 export interface CandidateData {

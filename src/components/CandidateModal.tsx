@@ -312,6 +312,78 @@ const DocumentSection = ({ doc, onReplaceDocument, candidateName }: { doc: Docum
             </div>
           )}
 
+          {doc.handwriting && (
+            <div className="bg-card rounded-md border border-border p-3">
+              <p className="text-xs font-semibold text-foreground mb-2 flex items-center gap-1.5">
+                <FileText className="h-3.5 w-3.5" /> Handwriting Recognition
+                <span className="ml-auto text-[10px] font-normal text-muted-foreground">Neural network pass</span>
+              </p>
+              <div className="space-y-1.5 text-xs">
+                {(doc.handwriting.handwritten_name || doc.handwriting.handwritten_surname) && (
+                  <div className="flex items-start gap-2">
+                    <span className="text-muted-foreground min-w-[110px]">Name (HW):</span>
+                    <span className="text-foreground font-medium">
+                      {[doc.handwriting.handwritten_name, doc.handwriting.handwritten_surname].filter(Boolean).join(" ")}
+                    </span>
+                    {doc.handwriting.field_confidences?.name != null && (
+                      <span className="ml-auto text-[10px] text-muted-foreground">{doc.handwriting.field_confidences.name}%</span>
+                    )}
+                  </div>
+                )}
+                {doc.handwriting.handwritten_id_number && (
+                  <div className="flex items-start gap-2">
+                    <span className="text-muted-foreground min-w-[110px]">ID No (HW):</span>
+                    <span className="text-foreground font-medium font-mono">{doc.handwriting.handwritten_id_number}</span>
+                    {doc.handwriting.field_confidences?.id_number != null && (
+                      <span className="ml-auto text-[10px] text-muted-foreground">{doc.handwriting.field_confidences.id_number}%</span>
+                    )}
+                  </div>
+                )}
+                {Array.isArray(doc.handwriting.handwritten_dates) && doc.handwriting.handwritten_dates.length > 0 && (
+                  <div>
+                    <span className="text-muted-foreground">Dates:</span>
+                    <ul className="mt-1 ml-2 space-y-0.5">
+                      {doc.handwriting.handwritten_dates.map((d: any, i: number) => (
+                        <li key={i} className="text-foreground">
+                          <span className="text-muted-foreground">{d.label}:</span> {formatDateToDayMonthYear(d.value_iso)}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {Array.isArray(doc.handwriting.marks) && doc.handwriting.marks.length > 0 && (
+                  <div>
+                    <span className="text-muted-foreground">Pen marks:</span>
+                    <ul className="mt-1 ml-2 space-y-0.5">
+                      {doc.handwriting.marks.map((m: any, i: number) => (
+                        <li key={i} className="text-foreground">
+                          {m.label} — <span className="font-medium">{m.kind}</span>
+                          <span className="ml-1 text-[10px] text-muted-foreground">({m.confidence}%)</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {Array.isArray(doc.handwriting.signature_blocks) && doc.handwriting.signature_blocks.length > 0 && (
+                  <div>
+                    <span className="text-muted-foreground">Signatures:</span>
+                    <ul className="mt-1 ml-2 space-y-0.5">
+                      {doc.handwriting.signature_blocks.map((s: any, i: number) => (
+                        <li key={i} className="text-foreground">
+                          {s.label}: <span className="font-medium">{s.present ? "present" : "missing"}</span>
+                          <span className="ml-1 text-[10px] text-muted-foreground">({s.confidence}%)</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {Array.isArray(doc.handwriting.illegible_fields) && doc.handwriting.illegible_fields.length > 0 && (
+                  <p className="text-warning italic">Illegible: {doc.handwriting.illegible_fields.join(", ")}</p>
+                )}
+              </div>
+            </div>
+          )}
+
           {(doc.stampDate || doc.policeStation || doc.certificationAuthority) && (
             <div className="bg-card rounded-md border border-border p-3">
               <p className="text-xs font-semibold text-foreground mb-2 flex items-center gap-1.5">
