@@ -1241,6 +1241,36 @@ serve(async (req) => {
       extracted.document_type = filenameHints.docTypeHint;
     }
 
+    // ── Stage A2: content-based reclassification when AI said "Other" and filename gave no hint ──
+    if (
+      (extracted.document_type === "Other" || !extracted.document_type) &&
+      !filenameHints.docTypeHint
+    ) {
+      console.log(`Stage A2: running content-based reclassification for "${file_name}"`);
+      const reclassified = await reclassifyDocument(OPENROUTER_API_KEY, file_url, file_name);
+      if (reclassified) {
+        const conf = typeof reclassified.confidence === "number" ? reclassified.confidence : 0;
+        const newType = (reclassified.document_type || "").trim();
+        const evidence = (reclassified.classification_evidence || "").trim();
+        if (newType && newType !== "Other" && conf >= 70) {
+          extracted.document_type = newType;
+          filenameOverrideChecks.push({
+            name: "Document type from content",
+            status: "pass",
+            detail: `Re-classified as "${newType}" (confidence ${conf}%) based on document content${evidence ? `: "${evidence.slice(0, 200)}"` : ""}.`,
+          });
+        } else {
+          filenameOverrideChecks.push({
+            name: "Document type unrecognised",
+            status: "warning",
+            detail: evidence
+              ? `No recognised Capaciti document headings or form codes found. Re-classification evidence: "${evidence.slice(0, 200)}".`
+              : `No recognised Capaciti document headings or form codes found. Document remains "Other".`,
+          });
+        }
+      }
+    }
+
     if (filenameOverrideChecks.length > 0) {
       extracted.checks = [...(extracted.checks || []), ...filenameOverrideChecks];
     }
