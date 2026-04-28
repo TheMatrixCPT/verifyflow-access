@@ -1508,190 +1508,217 @@ serve(async (req) => {
     const filenameHints = parseFilename(file_name);
     console.log(`Filename hints for "${file_name}":`, JSON.stringify(filenameHints));
 
-    const systemPrompt = buildSystemPrompt(confidenceThreshold, stampValidityMonths, strictMode, crossReferenceContext);
+    const aiProvider = "openrouter";
 
-    let aiResponse: Response;
-    let aiProvider = "openrouter";
-
-    // All AI processing goes through OpenRouter
+    // Async mode is no longer supported by the staged pipeline; fall through to sync.
     if (async_mode) {
-      console.log(`Using OpenRouter ASYNC mode (model: ${aiModel}) for document:`, document_id);
-      const asyncResult = await analyzeWithOpenRouter(OPENROUTER_API_KEY, aiModel, systemPrompt, file_url, file_name, crossReferenceContext, filenameHints, true, document_id);
-      
-      if (asyncResult.ok) {
-        return new Response(JSON.stringify({
-          success: true,
-          document_id,
-          ai_provider: "openrouter-async",
-          ai_model: aiModel,
-          status: "processing_async",
-          message: "Document submitted for async processing. Results will be delivered via webhook.",
-        }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      } else {
-        console.log(`OpenRouter async failed (${asyncResult.status}), falling back to sync`);
-      }
+      console.log("async_mode requested but staged pipeline is sync-only; running sync.");
     }
 
-    // Sync mode with OpenRouter — run Stage A (validation) and Stage B (handwriting) in parallel
-    console.log(`Using OpenRouter (sync, model: ${aiModel}) for document analysis + handwriting pass`);
-    const [aiResponseRes, handwritingRes] = await Promise.all([
-      analyzeWithOpenRouter(OPENROUTER_API_KEY, aiModel, systemPrompt, file_url, file_name, crossReferenceContext, filenameHints),
+    const today = new Date().toISOString().split("T")[0];
+    const programmeYear = new Date().getFullYear();
+
+    // ── Stage 2 + Stage B run in parallel (classification + handwriting) ──
+    console.log(`Stage 2: classifying with ${aiModel} for "${file_name}"`);
+    const [classifyResult, handwriting] = await Promise.all([
+      classifyDocument(OPENROUTER_API_KEY, aiModel, file_url, file_name),
       analyzeHandwriting(OPENROUTER_API_KEY, file_url, file_name),
     ]);
-    aiResponse = aiResponseRes;
-    const handwriting = handwritingRes;
 
-    if (!aiResponse.ok) {
-      const status = aiResponse.status;
-      if (status === 402) {
-        return new Response(JSON.stringify({
-          error: "credits_exhausted",
-          message: "Your OpenRouter credits have been exhausted. Please top up your credits at openrouter.ai to continue processing documents.",
-        }), {
-          status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" }
-        });
+    // ── Decide doc_type from filename + classify + reclassify ──
+    let doc_type = "Other";
+    let classificationSource: "ai" | "filename" | "reclassify" | "unknown" = "unknown";
+    let classificationConfidence = 0;
+    let classificationEvidence = "";
+
+    if (classifyResult && classifyResult.document_type && classifyResult.document_type !== "Other" && (classifyResult.confidence ?? 0) >= 70) {
+      doc_type = classifyResult.document_type;
+      classificationSource = "ai";
+      classificationConfidence = classifyResult.confidence ?? 0;
+      classificationEvidence = classifyResult.classification_evidence || "";
+    } else if (filenameHints.docTypeHint) {
+      doc_type = filenameHints.docTypeHint;
+      classificationSource = "filename";
+      classificationConfidence = 80;
+      classificationEvidence = `Filename suffix indicates "${filenameHints.docTypeHint}".`;
+    } else {
+      // Stage 2b: content-based reclassification
+      console.log(`Stage 2b: running reclassification for "${file_name}"`);
+      const reclassified = await reclassifyDocument(OPENROUTER_API_KEY, file_url, file_name);
+      if (reclassified && reclassified.document_type && reclassified.document_type !== "Other" && (reclassified.confidence ?? 0) >= 70) {
+        doc_type = reclassified.document_type;
+        classificationSource = "reclassify";
+        classificationConfidence = reclassified.confidence ?? 0;
+        classificationEvidence = reclassified.classification_evidence || "";
+      } else if (classifyResult) {
+        // Keep whatever Stage 2 returned (likely Other) with its evidence
+        doc_type = classifyResult.document_type || "Other";
+        classificationSource = "ai";
+        classificationConfidence = classifyResult.confidence ?? 0;
+        classificationEvidence = classifyResult.classification_evidence || (reclassified?.classification_evidence || "");
       }
-      if (status === 429) {
-        return new Response(JSON.stringify({
-          error: "rate_limited",
-          message: "Rate limit reached. Please wait a moment and try again.",
-        }), {
-          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" }
-        });
-      }
-      const errText = await aiResponse.text();
-      console.error(`OpenRouter AI error (model: ${aiModel}):`, status, errText);
-      if (status === 400) {
-        return new Response(JSON.stringify({
-          error: "ai_bad_request",
-          message: "The AI service could not process this file. It may be an unsupported format, too large, or corrupted. Please re-upload a clear PDF or image.",
-          details: errText.slice(0, 500),
-        }), {
-          status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" }
-        });
-      }
-      throw new Error(`OpenRouter AI error: ${status}`);
     }
 
-    const aiData = await aiResponse.json();
-    const toolCall = extractToolCall(aiData);
+    console.log(`Classified "${file_name}" as "${doc_type}" via ${classificationSource} (${classificationConfidence}%)`);
 
-    let extracted = {
-      document_type: "Other",
-      candidate_name: "Unknown",
-      confidence: 50,
-      validation_status: "warning",
-      checks: [] as { name: string; status: string; detail: string }[],
-      issues: [] as string[],
-      summary: "Could not fully analyze document",
-      extracted_id_number: null as string | null,
-      stamp_date: null as string | null,
-      stamp_date_valid: null as boolean | null,
-      police_station: null as string | null,
-      certification_authority: null as string | null,
-      extracted_info: null as Record<string, any> | null,
+    // ── Stage 3: pick the checklist ──
+    const checklist = getChecklist(doc_type);
+
+    // ── Stage 4: strict, checklist-scoped extraction ──
+    const extractResult = await extractFields(
+      OPENROUTER_API_KEY,
+      aiModel,
+      file_url,
+      file_name,
+      checklist,
+      filenameHints,
+      crossReferenceContext,
+    );
+
+    if (!extractResult) {
+      // Extraction failed — record a graceful error result rather than throwing
+      const errorChecks: Check[] = [
+        { name: "Document extraction", status: "fail", detail: "AI extraction call failed. Please re-upload or retry." },
+      ];
+      await supabase.from("documents").update({
+        document_type: doc_type,
+        candidate_name_extracted: filenameHints.candidateName || "Unknown",
+        confidence_score: 0,
+        validation_status: "fail",
+        issues: ["AI extraction failed"],
+        validation_details: {
+          summary: "AI extraction call failed.",
+          checks: errorChecks,
+          extracted_id_number: filenameHints.idNumber || null,
+          stamp_date: null,
+          stamp_date_valid: null,
+          police_station: null,
+          certification_authority: null,
+          extracted_info: filenameHints.idNumber ? { id_number: filenameHints.idNumber } : null,
+          ai_provider: aiProvider,
+          ai_model: aiModel,
+          sa_id_validation: null,
+          handwriting: handwriting || null,
+          handwriting_model: handwriting ? "google/gemini-2.5-pro" : null,
+          classification: { document_type: doc_type, confidence: classificationConfidence, evidence: classificationEvidence, source: classificationSource },
+          critical_fields: null,
+        },
+        processed_at: new Date().toISOString(),
+      }).eq("id", document_id);
+
+      return new Response(JSON.stringify({
+        success: false,
+        document_id,
+        ai_provider: aiProvider,
+        ai_model: aiModel,
+        document_type: doc_type,
+        validation_status: "fail",
+        summary: "AI extraction call failed.",
+      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // Normalise critical_fields (ensure all keys present with shape)
+    const critical: Record<string, { value: string | null; confidence: number; evidence_text: string; page_number?: number | null }> = {};
+    for (const k of CRITICAL_FIELD_KEYS) {
+      const f = extractResult.critical_fields?.[k] || {};
+      critical[k] = {
+        value: typeof f.value === "string" ? f.value : null,
+        confidence: typeof f.confidence === "number" ? f.confidence : 0,
+        evidence_text: typeof f.evidence_text === "string" ? f.evidence_text : "",
+        page_number: typeof f.page_number === "number" ? f.page_number : null,
+      };
+    }
+
+    const extractedInfoRaw = extractResult.extracted_info || {};
+    // Promote handwriting into critical fields when extractor left them blank
+    if (handwriting) {
+      const hwName = [handwriting.handwritten_name, handwriting.handwritten_surname]
+        .filter((v: any) => typeof v === "string" && v.trim()).join(" ").trim();
+      if (hwName && !(critical.full_name.value || "").trim()) {
+        critical.full_name.value = hwName;
+        critical.full_name.evidence_text = `Recovered from handwriting pass (confidence ${Math.max(handwriting.field_confidences?.name || 0, handwriting.field_confidences?.surname || 0)}%).`;
+        critical.full_name.confidence = Math.max(handwriting.field_confidences?.name || 0, handwriting.field_confidences?.surname || 0);
+      }
+      const hwId = (handwriting.handwritten_id_number || "").replace(/\D/g, "");
+      if (/^\d{13}$/.test(hwId) && !(critical.id_number.value || "").trim()) {
+        critical.id_number.value = hwId;
+        critical.id_number.evidence_text = `Recovered from handwriting pass (confidence ${handwriting.field_confidences?.id_number || 0}%).`;
+        critical.id_number.confidence = handwriting.field_confidences?.id_number || 0;
+      }
+    }
+
+    // Build the validation context
+    const ctx: ValidationCtx = {
+      doc_type,
+      fileName: file_name,
+      filenameHints,
+      critical,
+      extracted_info: normalizeExtractedInfo(extractedInfoRaw) || extractedInfoRaw,
+      handwriting,
+      crossReferenceContext,
+      stampValidityMonths,
+      programmeYear,
+      confidenceThreshold,
     };
 
-    const toolArguments = toolCall?.function?.arguments || toolCall?.arguments;
-    if (toolArguments) {
-      try {
-        extracted = JSON.parse(toolArguments);
-      } catch (e) {
-        console.error("Failed to parse AI response:", e);
-      }
-    }
+    // ── Stage 5: deterministic rule-based validation ──
+    const ruleChecks = runValidation(checklist, ctx);
 
-    // ── Filename-wins override for candidate identification ──
-    // The admin named the file, so trust filename for candidate_name, ID, and doc type.
-    // Surface mismatches as warnings instead of silently overriding.
-    const filenameOverrideChecks: { name: string; status: string; detail: string }[] = [];
-    const aiCandidateName = (extracted.candidate_name || "").trim();
-    const aiIdNumber = (extracted.extracted_id_number || extracted.extracted_info?.id_number || "").toString().replace(/\s/g, "");
+    // ── Stage 6: cross-check critical values ──
+    const crossChecks = crossCheckCriticalFields(ctx);
 
-    if (filenameHints.candidateName) {
-      const filenameNameNorm = filenameHints.candidateName.toLowerCase().replace(/\s+/g, "");
-      const aiNameNorm = aiCandidateName.toLowerCase().replace(/\s+/g, "");
-      const namesAgree = aiNameNorm && (filenameNameNorm.includes(aiNameNorm) || aiNameNorm.includes(filenameNameNorm));
+    // ── Stage 7: confidence gating ──
+    const confidenceChecks = gateConfidence(ctx, ruleChecks);
 
-      if (!aiCandidateName || aiCandidateName.toLowerCase() === "unknown") {
-        extracted.candidate_name = filenameHints.candidateName;
-      } else if (!namesAgree) {
-        // Conflict — filename wins, raise a warning
-        filenameOverrideChecks.push({
-          name: "Filename vs document name match",
-          status: "warning",
-          detail: `Filename indicates "${filenameHints.candidateName}" but document content reads "${aiCandidateName}". Using filename for grouping; please verify.`,
-        });
-        extracted.candidate_name = filenameHints.candidateName;
-      }
-    }
+    // Classification provenance check (informational)
+    const classificationCheck: Check = classificationSource === "ai" || classificationSource === "reclassify"
+      ? { name: "Document type from content", status: "pass", detail: `Classified as "${doc_type}" via ${classificationSource} (${classificationConfidence}%)${classificationEvidence ? `: "${classificationEvidence.slice(0, 200)}"` : ""}.` }
+      : classificationSource === "filename"
+        ? { name: "Document type from filename", status: "pass", detail: `Inferred from filename suffix as "${doc_type}".` }
+        : { name: "Document type unrecognised", status: "warning", detail: `Could not classify the document. Treating as "Other".` };
 
-    if (filenameHints.idNumber) {
-      if (!aiIdNumber || aiIdNumber.length !== 13) {
-        extracted.extracted_id_number = filenameHints.idNumber;
-        extracted.extracted_info = { ...(extracted.extracted_info || {}), id_number: filenameHints.idNumber };
-      } else if (aiIdNumber !== filenameHints.idNumber) {
-        filenameOverrideChecks.push({
-          name: "Filename vs document ID number match",
-          status: "warning",
-          detail: `Filename ID "${filenameHints.idNumber}" does not match document ID "${aiIdNumber}". Using filename ID; please verify.`,
-        });
-        extracted.extracted_id_number = filenameHints.idNumber;
-        extracted.extracted_info = { ...(extracted.extracted_info || {}), id_number: filenameHints.idNumber };
-      }
-    }
+    const allChecks: Check[] = [classificationCheck, ...ruleChecks, ...crossChecks, ...confidenceChecks];
 
-    // If AI returned "Other" but filename has a recognised doc type suffix, prefer the filename type
-    if (filenameHints.docTypeHint && (extracted.document_type === "Other" || !extracted.document_type)) {
-      filenameOverrideChecks.push({
-        name: "Document type from filename",
-        status: "pass",
-        detail: `Document type inferred from filename suffix as "${filenameHints.docTypeHint}".`,
-      });
-      extracted.document_type = filenameHints.docTypeHint;
-    }
+    // Build the legacy `extracted` object the rest of the function (and UI) expects
+    const candidateNameOut = (critical.candidate_name.value || critical.full_name.value || ctx.extracted_info?.full_name || filenameHints.candidateName || "Unknown").toString().trim() || "Unknown";
+    const idOut = (critical.id_number.value || ctx.extracted_info?.id_number || filenameHints.idNumber || "").toString().replace(/\s/g, "");
 
-    // ── Stage A2: content-based reclassification when AI said "Other" and filename gave no hint ──
-    if (
-      (extracted.document_type === "Other" || !extracted.document_type) &&
-      !filenameHints.docTypeHint
-    ) {
-      console.log(`Stage A2: running content-based reclassification for "${file_name}"`);
-      const reclassified = await reclassifyDocument(OPENROUTER_API_KEY, file_url, file_name);
-      if (reclassified) {
-        const conf = typeof reclassified.confidence === "number" ? reclassified.confidence : 0;
-        const newType = (reclassified.document_type || "").trim();
-        const evidence = (reclassified.classification_evidence || "").trim();
-        if (newType && newType !== "Other" && conf >= 70) {
-          extracted.document_type = newType;
-          filenameOverrideChecks.push({
-            name: "Document type from content",
-            status: "pass",
-            detail: `Re-classified as "${newType}" (confidence ${conf}%) based on document content${evidence ? `: "${evidence.slice(0, 200)}"` : ""}.`,
-          });
-        } else {
-          filenameOverrideChecks.push({
-            name: "Document type unrecognised",
-            status: "warning",
-            detail: evidence
-              ? `No recognised Capaciti document headings or form codes found. Re-classification evidence: "${evidence.slice(0, 200)}".`
-              : `No recognised Capaciti document headings or form codes found. Document remains "Other".`,
-          });
-        }
-      }
-    }
+    const overallStatus = aggregateStatus(allChecks);
+    const issues = allChecks.filter((c) => c.status === "fail").map((c) => `${c.name}: ${c.detail}`);
 
-    if (filenameOverrideChecks.length > 0) {
-      extracted.checks = [...(extracted.checks || []), ...filenameOverrideChecks];
-    }
+    // Average confidence across populated critical fields → confidence_score
+    const populated = Object.values(critical).filter((f) => (f.value || "").toString().trim());
+    const avgConfidence = populated.length > 0
+      ? Math.round(populated.reduce((sum, f) => sum + (f.confidence || 0), 0) / populated.length)
+      : 50;
 
-    // ── Stage B reconciliation: handwriting recognition pass ──
-    const handwritingChecks = reconcileHandwriting(extracted, handwriting);
-    if (handwritingChecks.length > 0) {
-      extracted.checks = [...(extracted.checks || []), ...handwritingChecks];
-    }
+    const extracted = {
+      document_type: doc_type,
+      candidate_name: candidateNameOut,
+      confidence: avgConfidence,
+      validation_status: overallStatus as "pass" | "warning" | "fail",
+      checks: allChecks as { name: string; status: string; detail: string }[],
+      issues,
+      summary: extractResult.summary || `Document classified as ${doc_type}. ${allChecks.length} checks performed.`,
+      extracted_id_number: idOut || null,
+      stamp_date: critical.stamp_date.value || extractResult.stamp_date || null,
+      stamp_date_valid: null as boolean | null,
+      police_station: extractResult.police_station || null,
+      certification_authority: critical.certification_authority.value || null,
+      extracted_info: { ...(ctx.extracted_info || {}) } as Record<string, any>,
+      // Additive — persisted in validation_details for future UI work
+      __classification: { document_type: doc_type, confidence: classificationConfidence, evidence: classificationEvidence, source: classificationSource },
+      __critical_fields: critical,
+    };
+
+    // Mirror critical fields back into legacy extracted_info shape for UI compatibility
+    if (critical.full_name.value && !extracted.extracted_info.full_name) extracted.extracted_info.full_name = critical.full_name.value;
+    if (idOut && !extracted.extracted_info.id_number) extracted.extracted_info.id_number = idOut;
+    if (critical.date_of_birth.value && !extracted.extracted_info.date_of_birth) extracted.extracted_info.date_of_birth = critical.date_of_birth.value;
+
+    // Compute stamp_date_valid based on the rule outcome (whichever applies)
+    const stampCheck = allChecks.find((c) => c.name.toLowerCase().includes("stamp date"));
+    if (stampCheck) extracted.stamp_date_valid = stampCheck.status === "pass";
 
     // ── SA ID Structural Validation (Luhn checksum) ──
     extracted.extracted_info = normalizeExtractedInfo(extracted.extracted_info) ?? null;
