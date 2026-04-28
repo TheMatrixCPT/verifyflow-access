@@ -1843,12 +1843,15 @@ serve(async (req) => {
       processed_at: new Date().toISOString(),
     }).eq("id", document_id);
 
+    const { __classification, __critical_fields, ...extractedPublic } = extracted;
     return new Response(JSON.stringify({
       success: true,
       document_id,
       ai_provider: aiProvider,
       ai_model: aiModel,
-      ...extracted,
+      ...extractedPublic,
+      classification: __classification,
+      critical_fields: __critical_fields,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
