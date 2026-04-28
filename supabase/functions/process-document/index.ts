@@ -196,6 +196,56 @@ function parseFilename(fileName: string): FilenameHints {
 // Shared helpers used by Stage 2 (classify) and Stage 4 (extract)
 // ═══════════════════════════════════════════════════════════════════════════
 
+function isPdfFile(fileName: string): boolean {
+  return fileName.toLowerCase().endsWith(".pdf");
+}
+
+function getMimeType(fileName: string): string {
+  const ext = fileName.toLowerCase().split(".").pop();
+  const mimeMap: Record<string, string> = {
+    pdf: "application/pdf",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    webp: "image/webp",
+  };
+  return mimeMap[ext || ""] || "application/octet-stream";
+}
+
+async function fetchFileAsBase64(fileUrl: string): Promise<string> {
+  const response = await fetch(fileUrl);
+  if (!response.ok) throw new Error(`Failed to fetch file: ${response.status}`);
+  const arrayBuffer = await response.arrayBuffer();
+  const uint8Array = new Uint8Array(arrayBuffer);
+  let binary = "";
+  const chunkSize = 8192;
+  for (let i = 0; i < uint8Array.length; i += chunkSize) {
+    const chunk = uint8Array.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
+function formatDateToDayMonthYear(value: string): string {
+  const trimmed = value.trim();
+  const m = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return trimmed;
+  return `${m[3]}/${m[2]}/${m[1]}`;
+}
+
+function normalizeExtractedInfo(extractedInfo: Record<string, any> | null | undefined) {
+  if (!extractedInfo) return extractedInfo;
+  const out: Record<string, any> = { ...extractedInfo };
+  if (typeof out.date_of_birth === "string") out.date_of_birth = formatDateToDayMonthYear(out.date_of_birth);
+  const fn = out.foreign_national;
+  if (typeof fn === "string") {
+    const cleaned = fn.trim().toLowerCase();
+    if (["yes", "y", "true", "foreigner", "foreign national"].includes(cleaned)) out.foreign_national = true;
+    else if (["no", "n", "false", "south african", "sa citizen", "citizen"].includes(cleaned)) out.foreign_national = false;
+  }
+  return out;
+}
+
 async function buildVisualUserContent(
   fileUrl: string,
   fileName: string,
