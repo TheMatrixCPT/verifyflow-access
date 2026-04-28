@@ -192,24 +192,377 @@ function parseFilename(fileName: string): FilenameHints {
   return result;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Shared helpers used by Stage 2 (classify) and Stage 4 (extract)
-// ═══════════════════════════════════════════════════════════════════════════
+const toolSchema = {
+  type: "function",
+  function: {
+    name: "extract_document_info",
+    description: "Extract and validate document information, including all readable content",
+    parameters: {
+      type: "object",
+      properties: {
+        document_type: {
+          type: "string",
+          enum: [
+            "Certified ID",
+            "Unemployment Affidavit",
+            "EEA1 Form",
+            "PWDS Confirmation of Disability",
+            "Social Media Consent",
+            "Beneficiary Agreement",
+            "Offer Letter",
+            "Employment Contract FTC",
+            "Certificate of Completion",
+            "MIE Verification",
+            "Bank Letter",
+            "TCX Unemployment Affidavit",
+            "CV",
+            "Capaciti Declaration",
+            "Qualification Matric",
+            "Tax Certificate",
+            "Other"
+          ],
+          description: "The type of Capaciti HR document. Pick the single best match."
+        },
+        candidate_name: { type: "string", description: "Person's full name or 'Unknown'" },
+        confidence: { type: "number", description: "Confidence score 0-100" },
+        validation_status: { type: "string", enum: ["pass", "warning", "fail"] },
+        checks: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              status: { type: "string", enum: ["pass", "warning", "fail"] },
+              detail: { type: "string" }
+            },
+            required: ["name", "status", "detail"]
+          }
+        },
+        issues: { type: "array", items: { type: "string" } },
+        summary: { type: "string", description: "Plain-English validation summary" },
+        extracted_id_number: { type: "string", description: "SA ID number if found (13 digits)" },
+        stamp_date: { type: "string", description: "Date on certification stamp if found (ISO format YYYY-MM-DD)" },
+        stamp_date_valid: { type: "boolean", description: "Whether the stamp date is within the configured validity period" },
+        police_station: { type: "string", description: "Police station name if found on stamp or document" },
+        certification_authority: { type: "string", description: "Commissioner of Oaths or Police station that certified the document" },
+        extracted_info: {
+          type: "object",
+          description: "All extracted information from the document",
+          properties: {
+            full_name: { type: "string", description: "Full name of person on document" },
+            id_number: { type: "string", description: "ID number if present" },
+            date_of_birth: { type: "string", description: "Date of birth if present" },
+            gender: { type: "string", description: "Gender if present" },
+            race: { type: "string", description: "Race selected on the employment equity form if present" },
+            nationality: { type: "string", description: "Nationality or citizenship status" },
+            foreign_national: { type: "boolean", description: "Whether the form indicates the person is a foreign national" },
+            foreign_national_support_date: { type: "string", description: "Acquired date, residence date, or permit-related date required when foreign national is marked yes" },
+            address: { type: "string", description: "Physical address if present" },
+            phone_number: { type: "string", description: "Phone number if present" },
+            email: { type: "string", description: "Email address if present" },
+            employer: { type: "string", description: "Employer name if present" },
+            job_title: { type: "string", description: "Job title or position if present" },
+            qualification_name: { type: "string", description: "Qualification/certificate name if applicable" },
+            institution: { type: "string", description: "Educational institution if applicable" },
+            issue_date: { type: "string", description: "Document issue date" },
+            expiry_date: { type: "string", description: "Document expiry date if present" },
+            reference_number: { type: "string", description: "Reference or document number" },
+            signature_present: { type: "boolean", description: "Whether a signature is present" },
+            additional_notes: { type: "string", description: "Any other extracted text or notable information" }
+          }
+        }
+      },
+      required: ["document_type", "candidate_name", "confidence", "validation_status", "checks", "issues", "summary", "extracted_info"],
+      additionalProperties: false
+    }
+  }
+};
+
+function buildSystemPrompt(
+  confidenceThreshold: number,
+  stampValidityMonths: number,
+  strictMode: boolean,
+  crossReferenceContext: CrossReferenceContext,
+): string {
+  const today = new Date().toISOString().split("T")[0];
+  return `You are a South African HR document validation AI for CapaCiTi / Capaciti training programme compliance.
+Your job is to validate uploaded candidate documents against strict rules. You do NOT approve candidates — you flag issues clearly so a human admin can make the final decision.
+
+TODAY'S DATE: ${today}
+
+GLOBAL SETTINGS:
+- Minimum confidence to pass: ${confidenceThreshold}%
+- ID certification stamp must be within ${stampValidityMonths} months
+- Strict mode: ${strictMode ? "ENABLED — flag any ambiguity, apply strictest interpretation" : "DISABLED — standard validation"}
+
+CANDIDATE ID CROSS-REFERENCE CONTEXT:
+${crossReferenceContext.available
+  ? `- Cross-reference is AVAILABLE for this document
+- Candidate name from uploaded ID context: ${crossReferenceContext.candidateName || "Unknown"}
+- Candidate ID number from uploaded ID context: ${crossReferenceContext.idNumber || "Unknown"}
+- Use this uploaded ID context only when a document type requires matching the candidate's ID number`
+  : `- Cross-reference is NOT available for this document
+- Do NOT perform any "matches candidate's ID document" validation
+- Do NOT add a fail, warning, or issue just because no candidate ID document is available
+- Validate the current document on its own contents only`}
+
+DOCUMENT TYPES AND THEIR SPECIFIC VALIDATION RULES:
+
+═══ SHARED FILE NAMING CONVENTION (applies to every document) ═══
+Every Capaciti document filename should follow:
+  CandidateNameSurname_IDNo_<DocSuffix>
+Examples: "JohnDoe_9001015009087_BA.pdf", "JaneSmith_8505126789012_Bank Letter.pdf".
+For every document, add ONE check named "File naming convention" with status:
+- "pass" if the filename appears to match the convention (candidate name/surname segment + a 13-digit ID segment + a recognisable doc suffix for the matched document type),
+- "warning" otherwise (NEVER fail). Detail must explain what is missing or wrong (e.g. "Missing 13-digit ID number in filename" or "Suffix should be _BA").
+Recognised suffixes per type:
+  Certified ID → _IDNo_FileName (any trailing label)
+  Unemployment Affidavit → _Unemployment Affidavit (or similar)
+  EEA1 Form → _EEA1 Form
+  PWDS Confirmation of Disability → _PWD
+  Social Media Consent → _Social Media Consent
+  Beneficiary Agreement → _BA
+  Offer Letter → _Offerletter
+  Employment Contract FTC → _FTC
+  Certificate of Completion → _Completionoftraining
+  Bank Letter → _Bank Letter
+  TCX Unemployment Affidavit → _TCX (or _Unemployment Affidavit)
+  CV → _CV
+  Capaciti Declaration → _Declaration
+  Qualification Matric → _Matric or _Qualification
+  Tax Certificate → _Tax number
+
+═══ 1. CERTIFIED ID ═══
+Required checks:
+- Image clarity: Is the image clear and not blurry?
+- ID number readable: 13-digit SA ID number visible and legible
+- All ID details legible: name, surname, date of birth, photo
+- Certification stamp present (Commissioner of Oaths or Police)
+- Stamp authority: identify Police Station name OR Commissioner of Oaths
+- Stamp signed: signature next to the certification stamp
+- Stamp dated: a date is written/printed on the stamp
+- Stamp date within the PROGRAMME YEAR: the certification date must fall within the current calendar year (year of the programme = year of TODAY's date ${today.substring(0, 4)}). If the date is from a previous year → fail. Use this rule INSTEAD of the generic "${stampValidityMonths} month" rule for Certified ID.
+- Barcode visible (if it is a card-type ID — barcode should be visible on the back). For book IDs this is N/A — emit as "Optional - Barcode visibility" warning.
+- Extract: stamp_date, police_station, certification_authority.
+
+═══ 2. UNEMPLOYMENT AFFIDAVIT ═══
+Required checks:
+- Candidate full name and surname filled in
+- Candidate 13-digit ID number filled in
+- Date filled in (sworn/signed date)
+- All other required fields completed (no blanks)
+- Candidate signature present
+- Certification stamp present, signed and dated by Commissioner of Oaths / Police
+- Stamp date within the last ${stampValidityMonths} months
+- Sworn/signed date corresponds to the certification stamp date (same day or within a few days). Mismatch → fail.
+- Follows the standard Capaciti Unemployment Skills Training Affidavit template (V100595).
+
+═══ 3. EEA1 FORM (Department of Labour) ═══
+Required checks:
+- Race marked properly (single clear selection) — extract into extracted_info.race
+- Gender marked properly
+- Full name AND surname displayed
+- Signed by candidate
+- Dated by candidate
+- "Person with disability" question answered Yes or No (must be answered)
+- Foreign National field: must state "No" (South African) OR "N/A" OR "Yes" with supporting acquired/residence/permit date
+  → Normalize into extracted_info.foreign_national (true/false)
+  → If Yes and no acquired/residence/permit date → fail
+- Employment number: NOT required — emit "Optional - Employment number" pass/info regardless of whether it is filled.
+
+═══ 4. PWDS CONFIRMATION OF DISABILITY ═══
+Required checks:
+- Type of disability is stated
+- Disability confirmed by a relevant SPECIALIST medical doctor (not a generic GP note)
+- Specialist signed AND dated the document
+- Doctor's official stamp present
+- Doctor's contact information completed (practice address / phone)
+- HPCSA registration: 
+    • If PRIVATE practice doctor → BOTH HPCSA practice number AND HPCSA personal registration number must be present
+    • If PUBLIC clinic / hospital doctor → HPCSA personal registration number must be present (practice number not required)
+- All required fields on the form completed by the doctor
+- Follows Capaciti Doctors Disability Certificate template (V100591) where applicable, but do NOT fail purely on layout if all clinical info is present.
+
+═══ 5. SOCIAL MEDIA CONSENT (Naspers Labs Letterhead template) ═══
+Required checks:
+- Page 1 completed by candidate (personal details filled)
+- Page 2: Graduate / Beneficiary signature AND date present
+- Page 2: Graduate / Beneficiary printed name present
+- Host partner / Delivery partner signature section: blank is ACCEPTABLE → emit "Optional - Host partner signature" warning if blank, pass if filled
+- Page 4: blank is ACCEPTABLE → emit "Optional - Page 4" pass/info
+- Inspect ALL pages before deciding a signature is missing.
+
+═══ 6. BENEFICIARY AGREEMENT (BA) ═══
+Required checks:
+- Front page: candidate name, surname, AND 13-digit ID number filled in
+- ID number matches the candidate's ID document (only if cross-reference context above is available)
+- Initialled on EVERY page (aggregate into a single check "Initials on every page" — fail if any page is missing initials)
+- Page 12: beneficiary signature AND printed name filled in
+- Page 13: beneficiary section completed (all fields filled)
+- Page 17: signed AND printed name by beneficiary
+- Electronic signatures must be an actual signature image / mark — typed names alone → fail
+- All annexures present (the BA should be complete, not partial)
+- Inspect ALL pages of this multi-page document before reporting anything as missing.
+
+═══ 7. OFFER / EMPLOYMENT LETTER ═══
+Required checks:
+- Company letterhead OR clear company contact details present
+- Candidate full name and surname present
+- Role / job title clearly stated
+- Salary amount stated
+- Signed by HR representative or Company Executive
+- Dated by signatory.
+
+═══ 8. EMPLOYMENT CONTRACT / FTC ═══
+Required checks:
+- Front cover: candidate name, surname, AND 13-digit ID number
+- All annexures present (complete contract)
+- Initialled on EVERY page (aggregate into one check "Initials on every page")
+- Page 10: candidate signature AND employer signature present
+- Page 11 (Schedule 1): all fields filled / completed
+- Page 12: signed AND dated
+- Signed and dated by BOTH employer and employee on the relevant signature pages
+- ID number matches the candidate's ID document (only if cross-reference context above is available)
+- Inspect ALL pages before deciding anything is missing.
+
+═══ 9. CERTIFICATE OF COMPLETION ═══
+Required checks:
+- Certificate or letter confirms a course, training programme, learnership, or the expected programme outcomes were achieved
+- Candidate full name and surname present
+- Signed by the Programme Manager OR Executive of the Implementing Partner (IP)
+- Dated by the signatory.
+
+═══ 10. BANK LETTER (no Naspers QA — informational only) ═══
+ALL checks for this type must be prefixed "Optional - " and use status pass/warning only — NEVER fail.
+Required checks:
+- Optional - Valid South African bank: bank name should be one of ABSA, Standard Bank, FNB / First National Bank, Nedbank, Capitec, Investec, African Bank, TymeBank, Discovery Bank, Bidvest, Sasfin, Bank Zero, Access Bank. Warning if unrecognised.
+- Optional - Account number present and looks valid (numeric, 9–11 digits typical)
+- Optional - Account holder identifier matches candidate (name/surname/ID where present).
+
+═══ 11. TCX UNEMPLOYMENT AFFIDAVIT (undergoes QA) ═══
+Required checks:
+- Candidate full name as per ID — first name, second name (if any), AND surname all present and matching the ID document where cross-reference is available
+- 13-digit ID number filled in
+- All form fields completed (no blanks)
+- Question 1 circled / marked "NO"
+- Question 2 circled / marked "NO"
+- Candidate signature present
+- Date filled in by candidate
+- Certification stamp present, signed AND dated by Commissioner of Oaths / Police
+- Sworn/signed date corresponds to the certification stamp date
+- Stamp date within the last ${stampValidityMonths} months.
+
+═══ 12. CV (informational only — no QA) ═══
+ALL checks prefixed "Optional - " — never fail.
+- Optional - Document is readable
+- Optional - Candidate name/surname present
+- Optional - Contact details present (phone or email).
+
+═══ 13. CAPACITI DECLARATION (internal use only) ═══
+Required checks:
+- Signed by candidate
+- Dated by candidate.
+
+═══ 14. QUALIFICATION / MATRIC (informational — actual MIE check is external) ═══
+ALL checks prefixed "Optional - " — never fail.
+- Optional - Document is readable
+- Optional - Institution name visible
+- Optional - Qualification / Matric title visible
+- Optional - Candidate name present.
+
+═══ 15. TAX CERTIFICATE (payroll use only — no Naspers QA) ═══
+ALL checks prefixed "Optional - " — never fail.
+- Optional - Document is readable
+- Optional - Tax / IRP5 reference number present
+- Optional - Candidate name and ID present where shown.
+
+═══ OTHER ═══
+For any document that does not match the above types:
+- Check image clarity
+- Extract all readable information
+- Verify candidate name, surname, ID number where present
+- Check for signatures, dates, stamps where contextually expected
+- Mark non-required missing stamps/certifications as "Optional - ..." warnings
+- Do NOT fail solely because of unfamiliar layout or branding.
+- If the filename or readable contents clearly indicate a known supporting document such as MIE verification, course or training completion, qualification evidence, CV, bank letter, or tax certificate, choose that specific document_type instead of "Other".
+
+INFORMATION EXTRACTION RULES:
+- You MUST extract ALL readable information into extracted_info
+- Extract names, ID numbers, dates, addresses, phone numbers, emails, reference numbers
+- HANDWRITTEN CONTENT: Many Capaciti documents are filled in by hand using a pen. Treat handwritten text, signatures, dates, ticks, crosses, circles, initials, and check boxes with the SAME rigor as printed text. Do your best to transcribe handwritten names, ID numbers, dates and answers — never skip a field just because it is handwritten. If handwriting is genuinely illegible after careful inspection, say so explicitly in the relevant check detail rather than marking the field as missing.
+- Read handwritten answers on TCX Q1/Q2, EEA1 race/disability/foreign-national, affidavits, declarations, disability forms, and any signature/date blocks
+- Read ALL pages of multi-page documents before deciding required information is missing
+- Stamps may overlap printed text — still extract stamp details where visible
+- Leave fields as empty string if not found — never invent information.
+
+STAMP DATE VALIDITY:
+- For Certified ID: the stamp date must be within the current programme YEAR (${today.substring(0, 4)}).
+- For all other documents that require a stamp: the stamp date must be within ${stampValidityMonths} months from today (${today}).
+- Set stamp_date_valid accordingly. If expired, add a FAIL check and include in issues.
+
+VALIDATION OUTPUT RULES:
+- For each check performed, include it in the "checks" array with name, status (pass/warning/fail), and detail
+- Prefix warning-only / no-QA / non-scoring checks with "Optional - "
+- Overall status: "fail" if ANY required check fails, "warning" if only non-critical issues exist, "pass" if all required checks pass
+- Provide a plain-English summary
+- Be specific about what failed and why
+- ALWAYS extract and report: stamp_date, police_station, certification_authority when visible
+- ALWAYS include the "File naming convention" check for every document.`;
+}
 
 function isPdfFile(fileName: string): boolean {
-  return fileName.toLowerCase().endsWith(".pdf");
+  return fileName.toLowerCase().endsWith('.pdf');
 }
 
 function getMimeType(fileName: string): string {
-  const ext = fileName.toLowerCase().split(".").pop();
+  const ext = fileName.toLowerCase().split('.').pop();
   const mimeMap: Record<string, string> = {
-    pdf: "application/pdf",
-    jpg: "image/jpeg",
-    jpeg: "image/jpeg",
-    png: "image/png",
-    webp: "image/webp",
+    pdf: 'application/pdf',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    webp: 'image/webp',
   };
-  return mimeMap[ext || ""] || "application/octet-stream";
+  return mimeMap[ext || ''] || 'application/octet-stream';
+}
+
+function formatDateToDayMonthYear(value: string): string {
+  const trimmedValue = value.trim();
+  const match = trimmedValue.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return trimmedValue;
+
+  const [, year, month, day] = match;
+  return `${day}/${month}/${year}`;
+}
+
+function normalizeExtractedBirthDate(extractedInfo: Record<string, any> | null | undefined) {
+  if (!extractedInfo || typeof extractedInfo.date_of_birth !== "string") return extractedInfo;
+
+  return {
+    ...extractedInfo,
+    date_of_birth: formatDateToDayMonthYear(extractedInfo.date_of_birth),
+  };
+}
+
+function normalizeExtractedInfo(extractedInfo: Record<string, any> | null | undefined) {
+  if (!extractedInfo) return extractedInfo;
+
+  const normalized = normalizeExtractedBirthDate(extractedInfo) || extractedInfo;
+  const foreignNational = normalized.foreign_national;
+
+  if (typeof foreignNational === "string") {
+    const cleaned = foreignNational.trim().toLowerCase();
+
+    if (["yes", "y", "true", "foreigner", "foreign national"].includes(cleaned)) {
+      return { ...normalized, foreign_national: true };
+    }
+
+    if (["no", "n", "false", "south african", "sa citizen", "citizen"].includes(cleaned)) {
+      return { ...normalized, foreign_national: false };
+    }
+  }
+
+  return normalized;
 }
 
 async function fetchFileAsBase64(fileUrl: string): Promise<string> {
@@ -217,7 +570,7 @@ async function fetchFileAsBase64(fileUrl: string): Promise<string> {
   if (!response.ok) throw new Error(`Failed to fetch file: ${response.status}`);
   const arrayBuffer = await response.arrayBuffer();
   const uint8Array = new Uint8Array(arrayBuffer);
-  let binary = "";
+  let binary = '';
   const chunkSize = 8192;
   for (let i = 0; i < uint8Array.length; i += chunkSize) {
     const chunk = uint8Array.subarray(i, i + chunkSize);
@@ -226,902 +579,87 @@ async function fetchFileAsBase64(fileUrl: string): Promise<string> {
   return btoa(binary);
 }
 
-function formatDateToDayMonthYear(value: string): string {
-  const trimmed = value.trim();
-  const m = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!m) return trimmed;
-  return `${m[3]}/${m[2]}/${m[1]}`;
-}
+async function buildUserContent(fileUrl: string, fileName: string, crossReferenceContext: CrossReferenceContext, filenameHints: FilenameHints): Promise<any[]> {
+  const crossReferencePrompt = crossReferenceContext.available
+    ? `Cross-reference context is available. Candidate name: "${crossReferenceContext.candidateName || "Unknown"}". Candidate ID number from uploaded ID document: "${crossReferenceContext.idNumber || "Unknown"}". Use that uploaded ID information only for document types that require ID matching.`
+    : `Cross-reference context is not available. Do not perform candidate ID cross-reference checks, and do not raise a fail or warning just because no ID document was uploaded with this candidate's documents.`;
 
-function normalizeExtractedInfo(extractedInfo: Record<string, any> | null | undefined) {
-  if (!extractedInfo) return extractedInfo;
-  const out: Record<string, any> = { ...extractedInfo };
-  if (typeof out.date_of_birth === "string") out.date_of_birth = formatDateToDayMonthYear(out.date_of_birth);
-  const fn = out.foreign_national;
-  if (typeof fn === "string") {
-    const cleaned = fn.trim().toLowerCase();
-    if (["yes", "y", "true", "foreigner", "foreign national"].includes(cleaned)) out.foreign_national = true;
-    else if (["no", "n", "false", "south african", "sa citizen", "citizen"].includes(cleaned)) out.foreign_national = false;
-  }
-  return out;
-}
+  const filenameHintParts: string[] = [];
+  if (filenameHints.candidateName) filenameHintParts.push(`candidate name "${filenameHints.candidateName}"`);
+  if (filenameHints.idNumber) filenameHintParts.push(`ID number "${filenameHints.idNumber}"`);
+  if (filenameHints.docTypeHint) filenameHintParts.push(`document type "${filenameHints.docTypeHint}"`);
+  const filenamePrompt = filenameHintParts.length > 0
+    ? `FILENAME HINTS (authoritative for identification — admin-named): The filename suggests ${filenameHintParts.join(", ")}. Use these as your primary signal for candidate_name, extracted_id_number, and document_type. Confirm them against the actual document content; if the document content clearly contradicts the filename, still extract what the document says but flag the mismatch in your summary. Filename wins on conflict for candidate identification.`
+    : `FILENAME HINTS: Could not parse a recognised pattern from "${fileName}". Identify the candidate and document type from content alone.`;
 
-async function buildVisualUserContent(
-  fileUrl: string,
-  fileName: string,
-  textPrompt: string,
-): Promise<any[]> {
+  const textPrompt = `Analyze this document and validate it thoroughly. Filename: "${fileName}". ${filenamePrompt} ${crossReferencePrompt} Check all pages before deciding anything is missing. Do not stop at the first pages of a multi-page document. Read pen marks, ticks, handwritten selections, and check boxes carefully because they contain important answers. Many forms are filled in by hand — transcribe handwritten names, IDs, dates and signatures with the same care as printed text. Remember to extract stamp dates, police station names, and certification authority details even when stamps overlap words. For employment equity forms, treat the nationality answer as Yes or No: No means South African, Yes means foreign national. If foreign national is marked yes, extract the acquired date of nationality, residence date, or permit-related date into extracted_info.foreign_national_support_date. For contracts, page 10 employee details is an information page and does not require employee or employer signatures. Some contracts require only the employee signature while others require both employee and employer signatures, so decide from the actual signature blocks and wording on the relevant signature page. For disability and proof-of-address documents, do not require Capaciti formatting if the core identifying information and stamps/signatures are present. If the filename or readable contents clearly indicate MIE verification, a course or training completion certificate, or another listed supporting document type, classify it using that specific document_type instead of "Other". CHOOSE "Other" ONLY AS A LAST RESORT. Before picking "Other", scan the document for: (a) form codes such as EEA1, TCX, IRP5, BA; (b) letterheads (SARS, SAPS, banks, municipalities, training providers); (c) titles like "Affidavit", "Bank Letter", "Proof of Address", "Proof of Residence", "Curriculum Vitae", "Certificate of Completion", "Matric Certificate", "Senior Certificate"; (d) signatory blocks ("Commissioner of Oaths"). A "Proof of Address" or "Proof of Residence" letter (bank, municipality, traffic department, SAPS) MUST be classified as "Bank Letter" — never "Other". If any of these point to one of the 16 Capaciti types, pick that type even when the filename gives no hint. For unfamiliar documents, still extract all readable information and verify candidate name, surname, and ID number where present. Mark non-required missing stamp or certification findings as warning checks prefixed with "Optional -". Respond using the extract_document_info function. Be thorough in your validation checks.`;
+  
   try {
     const base64 = await fetchFileAsBase64(fileUrl);
     const mimeType = getMimeType(fileName);
+    
     if (isPdfFile(fileName)) {
+      // For Gemini-compatible APIs, use inline_data for PDFs
       return [
         { type: "text", text: textPrompt },
-        { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}` } },
+        { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}` } }
+      ];
+    } else {
+      return [
+        { type: "text", text: textPrompt },
+        { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}`, detail: "high" } }
       ];
     }
-    return [
-      { type: "text", text: textPrompt },
-      { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}`, detail: "high" } },
-    ];
   } catch (e) {
     console.error("Failed to fetch file for base64 encoding:", e);
+    // Fallback to URL-based approach for images
     if (!isPdfFile(fileName)) {
       return [
         { type: "text", text: textPrompt },
-        { type: "image_url", image_url: { url: fileUrl, detail: "high" } },
+        { type: "image_url", image_url: { url: fileUrl, detail: "high" } }
       ];
     }
-    return [{ type: "text", text: `${textPrompt}\n\nFile URL (could not download): ${fileUrl}` }];
+    // For PDFs that can't be fetched, text-only fallback
+    return [
+      { type: "text", text: `${textPrompt}\n\nFile URL (could not download): ${fileUrl}` },
+    ];
   }
 }
 
-async function callOpenRouterWithTool(
-  apiKey: string,
-  model: string,
-  systemPrompt: string,
-  userContent: any[],
-  toolSchema: any,
-  toolName: string,
-  title: string,
-): Promise<{ ok: true; args: any } | { ok: false; status: number; text: string }> {
+async function analyzeWithOpenRouter(apiKey: string, model: string, systemPrompt: string, fileUrl: string, fileName: string, crossReferenceContext: CrossReferenceContext, filenameHints: FilenameHints, asyncMode: boolean = false, documentId?: string) {
+  const userContent = await buildUserContent(fileUrl, fileName, crossReferenceContext, filenameHints);
+
+  const body: Record<string, any> = {
+    model,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userContent }
+    ],
+    tools: [toolSchema],
+    tool_choice: { type: "function", function: { name: "extract_document_info" } }
+  };
+
+  // For async mode, use OpenRouter's callback webhook
+  if (asyncMode && documentId) {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    body.route = "async";
+    body.provider = {
+      callback_url: `${supabaseUrl}/functions/v1/openrouter-webhook`,
+      custom_data: { document_id: documentId },
+    };
+  }
+
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
       "HTTP-Referer": Deno.env.get("SUPABASE_URL") || "https://lovable.dev",
-      "X-Title": title,
+      "X-Title": "CapaCiTi Document Validator",
     },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userContent },
-      ],
-      tools: [toolSchema],
-      tool_choice: { type: "function", function: { name: toolName } },
-    }),
+    body: JSON.stringify(body),
   });
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    return { ok: false, status: response.status, text };
-  }
-  const data = await response.json();
-  const tc = data.choices?.[0]?.message?.tool_calls?.[0];
-  const argsRaw = tc?.function?.arguments || tc?.arguments;
-  if (!argsRaw) return { ok: false, status: 200, text: "no tool call returned" };
-  try {
-    return { ok: true, args: JSON.parse(argsRaw) };
-  } catch (e) {
-    return { ok: false, status: 200, text: `JSON parse failed: ${e}` };
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Stage 2 — Classification only (no extraction, no validation)
-// ═══════════════════════════════════════════════════════════════════════════
-
-const CAPACITI_DOC_TYPES_FULL = [
-  "Certified ID",
-  "Unemployment Affidavit",
-  "EEA1 Form",
-  "PWDS Confirmation of Disability",
-  "Social Media Consent",
-  "Beneficiary Agreement",
-  "Offer Letter",
-  "Employment Contract FTC",
-  "Certificate of Completion",
-  "MIE Verification",
-  "Bank Letter",
-  "TCX Unemployment Affidavit",
-  "CV",
-  "Capaciti Declaration",
-  "Qualification Matric",
-  "Tax Certificate",
-  "Other",
-] as const;
-
-const classifyToolSchema = {
-  type: "function",
-  function: {
-    name: "classify_document",
-    description: "Classify a Capaciti HR document by its headings, form codes, letterheads, and titles only. Do NOT extract personal information.",
-    parameters: {
-      type: "object",
-      properties: {
-        document_type: { type: "string", enum: [...CAPACITI_DOC_TYPES_FULL] },
-        confidence: { type: "number", description: "Confidence 0-100 in the chosen type." },
-        classification_evidence: { type: "string", description: "Exact text (heading, form code, letterhead, title) used to make the decision." },
-      },
-      required: ["document_type", "confidence", "classification_evidence"],
-      additionalProperties: false,
-    },
-  },
-};
-
-const CLASSIFY_SYSTEM_PROMPT = `You are a Capaciti HR document classifier. Your ONLY job is to identify the document type. You MUST NOT extract names, ID numbers, dates, or any other personal information.
-
-Look ONLY at strong identifying signals:
-- Headings and document titles ("Affidavit", "Bank Letter", "Proof of Address", "Proof of Residence", "Curriculum Vitae", "Certificate of Completion", "Matric Certificate", "Senior Certificate", "Beneficiary Agreement", "Employment Contract", "Offer Letter", "Confirmation of Disability", "Social Media Consent", "Capaciti Declaration")
-- Form codes / IDs printed on the page (EEA1, TCX, IRP5, BA, FTC)
-- Letterheads (SARS, SAPS, banks, municipalities, traffic department, training providers, Capaciti, Naspers Labs)
-- Signatory blocks ("Commissioner of Oaths", "SAPS")
-- Page structure (multi-page contract vs single-page certificate)
-
-Mapping rules:
-- Proof of Address / Proof of Residence letters from a bank, municipality, traffic department, or SAPS → "Bank Letter".
-- Police clearance / SAPS unemployment affidavit (not on the Capaciti template) → "Unemployment Affidavit".
-- TCX Unemployment Affidavit (Capaciti TCX template) → "TCX Unemployment Affidavit".
-- IRP5 / SARS tax number letter / income tax certificate → "Tax Certificate".
-- MIE consent / background check → "MIE Verification".
-- Matric / Senior Certificate / NSC / IEB → "Qualification Matric".
-- Certified copy of an SA ID (book or card) with a Commissioner of Oaths / Police stamp → "Certified ID".
-
-Return "Other" ONLY as a last resort, when no heading, form code, letterhead, or title points to any of the 16 types. Provide classification_evidence (the exact text relied on) and a confidence 0-100. Read every page.
-
-Respond using the classify_document function.`;
-
-async function classifyDocument(
-  apiKey: string,
-  model: string,
-  fileUrl: string,
-  fileName: string,
-): Promise<{ document_type: string; confidence: number; classification_evidence: string } | null> {
-  const userContent = await buildVisualUserContent(
-    fileUrl,
-    fileName,
-    `Classify this document (filename: "${fileName}"). Read every page. Look only at headings, form codes, letterheads, titles, and signatory blocks.`,
-  );
-  const result = await callOpenRouterWithTool(
-    apiKey,
-    model,
-    CLASSIFY_SYSTEM_PROMPT,
-    userContent,
-    classifyToolSchema,
-    "classify_document",
-    "CapaCiTi Document Classification",
-  );
-  if (!result.ok) {
-    console.warn(`Classify pass failed (${result.status}): ${result.text.slice(0, 200)}`);
-    return null;
-  }
-  return result.args;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Stage 3 — Checklist definitions (one per document type)
-// ═══════════════════════════════════════════════════════════════════════════
-
-type Check = { name: string; status: "pass" | "warning" | "fail"; detail: string };
-
-type ValidationCtx = {
-  doc_type: string;
-  fileName: string;
-  filenameHints: FilenameHints;
-  critical: Record<string, { value: string | null; confidence: number; evidence_text: string; page_number?: number | null }>;
-  extracted_info: Record<string, any>;
-  handwriting: any | null;
-  crossReferenceContext: CrossReferenceContext;
-  stampValidityMonths: number;
-  programmeYear: number;
-  confidenceThreshold: number;
-};
-
-type RuleResult = { status: "pass" | "warning" | "fail"; detail: string } | null;
-
-type ChecklistRule = {
-  id: string;
-  label: string;
-  required: boolean; // false → emitted as "Optional - …", can never fail
-  validator: (ctx: ValidationCtx) => RuleResult;
-};
-
-type Checklist = {
-  doc_type: string;
-  // List of fields the AI must extract for this checklist (drives Stage 4 prompt)
-  fields: string[];
-  rules: ChecklistRule[];
-};
-
-// ── deterministic helpers ─────────────────────────────────────────────────
-function isThirteenDigits(s: string | null | undefined): boolean {
-  return !!s && /^\d{13}$/.test(s.replace(/\s/g, ""));
-}
-
-function parseFlexibleDate(s: string | null | undefined): Date | null {
-  if (!s || typeof s !== "string") return null;
-  const trimmed = s.trim();
-  // ISO YYYY-MM-DD
-  let m = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (m) {
-    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-    if (d.getFullYear() === Number(m[1]) && d.getMonth() === Number(m[2]) - 1 && d.getDate() === Number(m[3])) return d;
-  }
-  // DD/MM/YYYY or DD-MM-YYYY
-  m = trimmed.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-  if (m) {
-    const d = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
-    if (d.getFullYear() === Number(m[3]) && d.getMonth() === Number(m[2]) - 1 && d.getDate() === Number(m[1])) return d;
-  }
-  return null;
-}
-
-function isWithinMonths(date: Date, months: number, today = new Date()): boolean {
-  const cutoff = new Date(today);
-  cutoff.setMonth(cutoff.getMonth() - months);
-  return date >= cutoff && date <= today;
-}
-
-function isWithinYear(date: Date, year: number): boolean {
-  return date.getFullYear() === year;
-}
-
-function signaturePresent(handwriting: any | null, labelMatcher: (l: string) => boolean): boolean | null {
-  if (!handwriting?.signature_blocks) return null;
-  for (const sb of handwriting.signature_blocks) {
-    if (typeof sb?.label === "string" && labelMatcher(sb.label.toLowerCase()) && sb.present === true) return true;
-  }
-  // If we have signature blocks but none match, return false; otherwise null (no info)
-  const anyMatched = handwriting.signature_blocks.some((sb: any) => typeof sb?.label === "string" && labelMatcher(sb.label.toLowerCase()));
-  return anyMatched ? false : null;
-}
-
-function initialsOnEveryPage(handwriting: any | null): { every: boolean; missing: number[]; total: number } | null {
-  const arr = handwriting?.initials_per_page;
-  if (!Array.isArray(arr) || arr.length === 0) return null;
-  const missing = arr.filter((p: any) => !p?.present).map((p: any) => p.page);
-  return { every: missing.length === 0, missing, total: arr.length };
-}
-
-function markedNo(handwriting: any | null, qLabel: string): boolean | null {
-  if (!handwriting?.marks) return null;
-  const lc = qLabel.toLowerCase();
-  for (const m of handwriting.marks) {
-    const lbl = (m?.label || "").toLowerCase();
-    if (lbl.includes(lc) && lbl.includes("no") && (m.kind === "tick" || m.kind === "circle" || m.kind === "cross") && (m.confidence || 0) >= 60) {
-      return true;
-    }
-  }
-  return false;
-}
-
-// ── reusable rule factories ───────────────────────────────────────────────
-function ruleHasValue(fieldKey: string, label: string, required = true): ChecklistRule {
-  return {
-    id: `has_${fieldKey}`,
-    label,
-    required,
-    validator: (ctx) => {
-      const f = ctx.critical[fieldKey];
-      const val = (f?.value || "").toString().trim();
-      if (!val) return { status: required ? "fail" : "warning", detail: `${label}: not found in document.` };
-      return { status: "pass", detail: `${label}: "${val}"${f.evidence_text ? ` (evidence: "${f.evidence_text.slice(0, 120)}")` : ""}.` };
-    },
-  };
-}
-
-function ruleStampWithinMonths(months: number, required = true): ChecklistRule {
-  return {
-    id: "stamp_within_months",
-    label: `Stamp date within last ${months} months`,
-    required,
-    validator: (ctx) => {
-      const f = ctx.critical.stamp_date;
-      const val = (f?.value || "").toString().trim();
-      if (!val) return { status: required ? "fail" : "warning", detail: "No certification stamp date found." };
-      const d = parseFlexibleDate(val);
-      if (!d) return { status: required ? "fail" : "warning", detail: `Stamp date "${val}" could not be parsed.` };
-      if (isWithinMonths(d, months)) return { status: "pass", detail: `Stamp dated ${val} is within the last ${months} months.` };
-      return { status: required ? "fail" : "warning", detail: `Stamp dated ${val} is outside the ${months}-month validity window.` };
-    },
-  };
-}
-
-function ruleStampWithinProgrammeYear(): ChecklistRule {
-  return {
-    id: "stamp_within_year",
-    label: "Stamp date within current programme year",
-    required: true,
-    validator: (ctx) => {
-      const f = ctx.critical.stamp_date;
-      const val = (f?.value || "").toString().trim();
-      if (!val) return { status: "fail", detail: "No certification stamp date found." };
-      const d = parseFlexibleDate(val);
-      if (!d) return { status: "fail", detail: `Stamp date "${val}" could not be parsed.` };
-      if (isWithinYear(d, ctx.programmeYear)) return { status: "pass", detail: `Stamp dated ${val} is within programme year ${ctx.programmeYear}.` };
-      return { status: "fail", detail: `Stamp dated ${val} is outside programme year ${ctx.programmeYear}.` };
-    },
-  };
-}
-
-function ruleSignaturePresent(matcher: (l: string) => boolean, label: string, required = true): ChecklistRule {
-  return {
-    id: `signature_${label.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`,
-    label,
-    required,
-    validator: (ctx) => {
-      const present = signaturePresent(ctx.handwriting, matcher);
-      if (present === true) return { status: "pass", detail: `${label}: handwriting pass detected a signature.` };
-      if (present === false) return { status: required ? "fail" : "warning", detail: `${label}: signature block found but no signature detected.` };
-      return { status: "warning", detail: `${label}: could not confirm a signature from the handwriting pass — please verify visually.` };
-    },
-  };
-}
-
-function ruleInitialsEveryPage(required = true): ChecklistRule {
-  return {
-    id: "initials_every_page",
-    label: "Initials on every page",
-    required,
-    validator: (ctx) => {
-      const r = initialsOnEveryPage(ctx.handwriting);
-      if (!r) return { status: "warning", detail: "Initials per page could not be confirmed from the handwriting pass — please verify visually." };
-      if (r.every) return { status: "pass", detail: `Initials present on all ${r.total} page(s).` };
-      return { status: required ? "fail" : "warning", detail: `Initials missing on page(s) ${r.missing.join(", ")} of ${r.total}.` };
-    },
-  };
-}
-
-function ruleMarkedNo(qLabel: string, required = true): ChecklistRule {
-  return {
-    id: `marked_no_${qLabel.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`,
-    label: `${qLabel} marked NO`,
-    required,
-    validator: (ctx) => {
-      const r = markedNo(ctx.handwriting, qLabel);
-      if (r === true) return { status: "pass", detail: `Pen mark on NO detected for ${qLabel}.` };
-      if (r === false) return { status: required ? "fail" : "warning", detail: `${qLabel}: NO answer not detected by handwriting pass.` };
-      return { status: "warning", detail: `${qLabel}: handwriting pass did not return marks — please verify visually.` };
-    },
-  };
-}
-
-function ruleFilenameConvention(): ChecklistRule {
-  return {
-    id: "filename_convention",
-    label: "File naming convention",
-    required: false,
-    validator: (ctx) => {
-      const fh = ctx.filenameHints;
-      const issues: string[] = [];
-      if (!fh.idNumber) issues.push("missing 13-digit ID number");
-      if (!fh.candidateName) issues.push("missing candidate name segment");
-      if (ctx.doc_type !== "Other" && !fh.docTypeHint) issues.push("missing recognisable doc-type suffix");
-      if (issues.length === 0) {
-        return { status: "pass", detail: `Filename "${ctx.fileName}" follows the convention.` };
-      }
-      return { status: "warning", detail: `Filename "${ctx.fileName}" — ${issues.join("; ")}.` };
-    },
-  };
-}
-
-// Common identification fields used by most checklists
-const COMMON_FIELDS = ["candidate_name", "full_name", "id_number"];
-
-// ── per-doc-type checklists ───────────────────────────────────────────────
-const CHECKLISTS: Record<string, Checklist> = {
-  "Certified ID": {
-    doc_type: "Certified ID",
-    fields: [...COMMON_FIELDS, "date_of_birth", "stamp_date", "certification_authority", "police_station", "gender"],
-    rules: [
-      ruleFilenameConvention(),
-      ruleHasValue("full_name", "Full name on ID"),
-      ruleHasValue("id_number", "13-digit SA ID number"),
-      ruleHasValue("date_of_birth", "Date of birth on ID"),
-      ruleHasValue("certification_authority", "Certification authority (Commissioner of Oaths or Police)"),
-      ruleHasValue("stamp_date", "Stamp dated", true),
-      ruleStampWithinProgrammeYear(),
-    ],
-  },
-  "Unemployment Affidavit": {
-    doc_type: "Unemployment Affidavit",
-    fields: [...COMMON_FIELDS, "stamp_date", "certification_authority"],
-    rules: [
-      ruleFilenameConvention(),
-      ruleHasValue("full_name", "Candidate full name"),
-      ruleHasValue("id_number", "13-digit SA ID number"),
-      ruleHasValue("certification_authority", "Commissioner of Oaths / Police"),
-      ruleStampWithinMonths(3, true),
-      ruleSignaturePresent((l) => l.includes("candidate") || l.includes("deponent") || l.includes("beneficiary"), "Candidate signature", true),
-    ],
-  },
-  "EEA1 Form": {
-    doc_type: "EEA1 Form",
-    fields: [...COMMON_FIELDS, "race", "gender", "foreign_national", "foreign_national_support_date"],
-    rules: [
-      ruleFilenameConvention(),
-      ruleHasValue("full_name", "Full name and surname"),
-      ruleSignaturePresent((l) => l.includes("candidate") || l.includes("employee") || l.includes("signed by"), "Candidate signature", true),
-      {
-        id: "race_marked",
-        label: "Race marked",
-        required: true,
-        validator: (ctx) => {
-          const v = (ctx.extracted_info?.race || "").toString().trim();
-          return v
-            ? { status: "pass", detail: `Race marked as "${v}".` }
-            : { status: "fail", detail: "Race not marked / not detected." };
-        },
-      },
-      {
-        id: "gender_marked",
-        label: "Gender marked",
-        required: true,
-        validator: (ctx) => {
-          const v = (ctx.extracted_info?.gender || "").toString().trim();
-          return v
-            ? { status: "pass", detail: `Gender marked as "${v}".` }
-            : { status: "fail", detail: "Gender not marked / not detected." };
-        },
-      },
-      {
-        id: "foreign_national",
-        label: "Foreign national field answered",
-        required: true,
-        validator: (ctx) => {
-          const fn = ctx.extracted_info?.foreign_national;
-          if (fn === true) {
-            const supp = (ctx.extracted_info?.foreign_national_support_date || "").toString().trim();
-            return supp
-              ? { status: "pass", detail: `Foreign national: Yes, supporting date "${supp}".` }
-              : { status: "fail", detail: "Foreign national marked Yes but no acquired/residence/permit date provided." };
-          }
-          if (fn === false) return { status: "pass", detail: "Foreign national: No (South African)." };
-          return { status: "fail", detail: "Foreign national field not answered." };
-        },
-      },
-    ],
-  },
-  "PWDS Confirmation of Disability": {
-    doc_type: "PWDS Confirmation of Disability",
-    fields: [...COMMON_FIELDS, "stamp_date", "certification_authority"],
-    rules: [
-      ruleFilenameConvention(),
-      ruleHasValue("full_name", "Candidate full name"),
-      ruleHasValue("certification_authority", "Specialist medical doctor", true),
-      ruleSignaturePresent((l) => l.includes("doctor") || l.includes("specialist") || l.includes("hpcsa"), "Doctor signature", true),
-    ],
-  },
-  "Social Media Consent": {
-    doc_type: "Social Media Consent",
-    fields: [...COMMON_FIELDS],
-    rules: [
-      ruleFilenameConvention(),
-      ruleHasValue("full_name", "Candidate / beneficiary name"),
-      ruleSignaturePresent((l) => l.includes("graduate") || l.includes("beneficiary") || l.includes("candidate"), "Beneficiary signature", true),
-      ruleSignaturePresent((l) => l.includes("host") || l.includes("delivery"), "Optional - Host partner signature", false),
-    ],
-  },
-  "Beneficiary Agreement": {
-    doc_type: "Beneficiary Agreement",
-    fields: [...COMMON_FIELDS],
-    rules: [
-      ruleFilenameConvention(),
-      ruleHasValue("full_name", "Candidate full name"),
-      ruleHasValue("id_number", "13-digit SA ID number"),
-      ruleInitialsEveryPage(true),
-      ruleSignaturePresent((l) => l.includes("beneficiary") || l.includes("page 12") || l.includes("page 17"), "Beneficiary signature", true),
-    ],
-  },
-  "Offer Letter": {
-    doc_type: "Offer Letter",
-    fields: [...COMMON_FIELDS, "employer", "job_title", "issue_date"],
-    rules: [
-      ruleFilenameConvention(),
-      ruleHasValue("full_name", "Candidate full name"),
-      ruleHasValue("employer", "Employer / company name"),
-      ruleHasValue("job_title", "Role / job title"),
-      ruleSignaturePresent((l) => l.includes("hr") || l.includes("executive") || l.includes("employer") || l.includes("company"), "Signed by HR / Executive", true),
-    ],
-  },
-  "Employment Contract FTC": {
-    doc_type: "Employment Contract FTC",
-    fields: [...COMMON_FIELDS, "employer", "job_title"],
-    rules: [
-      ruleFilenameConvention(),
-      ruleHasValue("full_name", "Candidate full name"),
-      ruleHasValue("id_number", "13-digit SA ID number"),
-      ruleInitialsEveryPage(true),
-      ruleSignaturePresent((l) => l.includes("employee") || l.includes("candidate"), "Employee signature", true),
-      ruleSignaturePresent((l) => l.includes("employer") || l.includes("company"), "Employer signature", true),
-    ],
-  },
-  "Certificate of Completion": {
-    doc_type: "Certificate of Completion",
-    fields: [...COMMON_FIELDS, "qualification_name", "institution", "issue_date"],
-    rules: [
-      ruleFilenameConvention(),
-      ruleHasValue("full_name", "Candidate full name"),
-      ruleHasValue("qualification_name", "Course / programme name"),
-      ruleSignaturePresent((l) => l.includes("manager") || l.includes("executive") || l.includes("partner"), "Signed by Programme Manager / Executive", true),
-    ],
-  },
-  "Bank Letter": {
-    doc_type: "Bank Letter",
-    fields: [...COMMON_FIELDS, "employer", "reference_number"],
-    rules: [
-      ruleFilenameConvention(),
-      ruleHasValue("full_name", "Optional - Account holder name", false),
-      ruleHasValue("reference_number", "Optional - Account / reference number", false),
-    ],
-  },
-  "TCX Unemployment Affidavit": {
-    doc_type: "TCX Unemployment Affidavit",
-    fields: [...COMMON_FIELDS, "stamp_date", "certification_authority"],
-    rules: [
-      ruleFilenameConvention(),
-      ruleHasValue("full_name", "Candidate full name"),
-      ruleHasValue("id_number", "13-digit SA ID number"),
-      ruleMarkedNo("Q1", true),
-      ruleMarkedNo("Q2", true),
-      ruleSignaturePresent((l) => l.includes("candidate") || l.includes("deponent"), "Candidate signature", true),
-      ruleHasValue("certification_authority", "Commissioner of Oaths / Police"),
-      ruleStampWithinMonths(3, true),
-    ],
-  },
-  "CV": {
-    doc_type: "CV",
-    fields: [...COMMON_FIELDS, "phone_number", "email"],
-    rules: [
-      ruleFilenameConvention(),
-      ruleHasValue("full_name", "Optional - Candidate name", false),
-      {
-        id: "contact_present",
-        label: "Optional - Contact details present",
-        required: false,
-        validator: (ctx) => {
-          const phone = (ctx.extracted_info?.phone_number || "").toString().trim();
-          const email = (ctx.extracted_info?.email || "").toString().trim();
-          return phone || email
-            ? { status: "pass", detail: `Contact: ${[phone, email].filter(Boolean).join(" / ")}.` }
-            : { status: "warning", detail: "No phone or email detected." };
-        },
-      },
-    ],
-  },
-  "Capaciti Declaration": {
-    doc_type: "Capaciti Declaration",
-    fields: [...COMMON_FIELDS, "issue_date"],
-    rules: [
-      ruleFilenameConvention(),
-      ruleHasValue("full_name", "Candidate name"),
-      ruleSignaturePresent((l) => l.includes("candidate") || l.includes("declarant"), "Candidate signature", true),
-      ruleHasValue("issue_date", "Dated by candidate", true),
-    ],
-  },
-  "Qualification Matric": {
-    doc_type: "Qualification Matric",
-    fields: [...COMMON_FIELDS, "qualification_name", "institution"],
-    rules: [
-      ruleFilenameConvention(),
-      ruleHasValue("full_name", "Optional - Candidate name", false),
-      ruleHasValue("institution", "Optional - Institution name", false),
-      ruleHasValue("qualification_name", "Optional - Qualification / Matric title", false),
-    ],
-  },
-  "Tax Certificate": {
-    doc_type: "Tax Certificate",
-    fields: [...COMMON_FIELDS, "reference_number"],
-    rules: [
-      ruleFilenameConvention(),
-      ruleHasValue("reference_number", "Optional - Tax / IRP5 reference number", false),
-      ruleHasValue("full_name", "Optional - Candidate name", false),
-    ],
-  },
-  "MIE Verification": {
-    doc_type: "MIE Verification",
-    fields: [...COMMON_FIELDS],
-    rules: [
-      ruleFilenameConvention(),
-      ruleHasValue("full_name", "Optional - Candidate name", false),
-    ],
-  },
-  "Other": {
-    doc_type: "Other",
-    fields: [...COMMON_FIELDS],
-    rules: [
-      ruleFilenameConvention(),
-      ruleHasValue("full_name", "Optional - Candidate name", false),
-      ruleHasValue("id_number", "Optional - 13-digit SA ID number", false),
-    ],
-  },
-};
-
-function getChecklist(doc_type: string): Checklist {
-  return CHECKLISTS[doc_type] || CHECKLISTS["Other"];
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Stage 4 — Strict, checklist-scoped extraction
-// ═══════════════════════════════════════════════════════════════════════════
-
-const CRITICAL_FIELD_KEYS = [
-  "candidate_name",
-  "full_name",
-  "id_number",
-  "date_of_birth",
-  "stamp_date",
-  "certification_authority",
-] as const;
-
-const criticalFieldSchema = {
-  type: "object",
-  properties: {
-    value: { type: "string", description: "Exact visible text. Empty string if not found." },
-    confidence: { type: "number", description: "0-100 confidence in this field." },
-    evidence_text: { type: "string", description: "The exact surrounding text, label, or stamp wording that supports this value." },
-    page_number: { type: "number", description: "1-indexed page number where the field was found, or 0 if unknown." },
-  },
-  required: ["value", "confidence", "evidence_text"],
-  additionalProperties: false,
-};
-
-function buildExtractToolSchema(): any {
-  const criticalProps: Record<string, any> = {};
-  for (const k of CRITICAL_FIELD_KEYS) criticalProps[k] = criticalFieldSchema;
-  return {
-    type: "function",
-    function: {
-      name: "extract_document_fields",
-      description: "Extract only the fields requested for this checklist. Use exact visible text only. Do not infer values.",
-      parameters: {
-        type: "object",
-        properties: {
-          critical_fields: {
-            type: "object",
-            description: "Structured extraction of critical fields with evidence and confidence.",
-            properties: criticalProps,
-            required: [...CRITICAL_FIELD_KEYS],
-            additionalProperties: false,
-          },
-          extracted_info: {
-            type: "object",
-            description: "Flat extraction of supporting fields. Leave empty/null if not visible.",
-            properties: {
-              full_name: { type: "string" },
-              id_number: { type: "string" },
-              date_of_birth: { type: "string" },
-              gender: { type: "string" },
-              race: { type: "string" },
-              nationality: { type: "string" },
-              foreign_national: { type: "boolean" },
-              foreign_national_support_date: { type: "string" },
-              address: { type: "string" },
-              phone_number: { type: "string" },
-              email: { type: "string" },
-              employer: { type: "string" },
-              job_title: { type: "string" },
-              qualification_name: { type: "string" },
-              institution: { type: "string" },
-              issue_date: { type: "string" },
-              expiry_date: { type: "string" },
-              reference_number: { type: "string" },
-              signature_present: { type: "boolean" },
-              additional_notes: { type: "string" },
-            },
-          },
-          stamp_date: { type: "string", description: "Date on certification stamp (YYYY-MM-DD if possible). Empty if none." },
-          police_station: { type: "string", description: "Police station name if visible. Empty if none." },
-          summary: { type: "string", description: "Plain-English description of what is on the document. No pass/fail judgement." },
-        },
-        required: ["critical_fields", "extracted_info", "summary"],
-        additionalProperties: false,
-      },
-    },
-  };
-}
-
-function buildExtractSystemPrompt(checklist: Checklist, today: string): string {
-  return `You are a strict, evidence-based extractor for South African HR documents.
-
-The document type has ALREADY been classified as "${checklist.doc_type}". Do NOT re-classify. Do NOT decide pass/fail. Validation is performed deterministically AFTER your extraction by a separate rule engine.
-
-TODAY'S DATE: ${today}
-
-YOUR JOB: extract only the fields listed below from the document.
-
-REQUESTED FIELDS FOR THIS CHECKLIST:
-- ${checklist.fields.join("\n- ")}
-
-STRICT EXTRACTION RULES:
-1. Use only EXACT visible text. Do NOT infer, guess, complete, or normalise.
-2. Do NOT combine fragments unless they are clearly part of the same labeled field on the page.
-3. If a field is ambiguous, multiply-labeled, or unclear, return an empty value with low confidence.
-4. Prefer the closest labeled field. If a value appears in two places, use the one with the clearest label.
-5. NAMES: copy the printed/handwritten name verbatim. Do NOT add, expand, or invent middle names. Only include a middle name if it is printed inside the SAME labeled full-name field. If only a first name and surname are visible in the labeled name field, return ONLY that.
-6. ID NUMBERS: must be exactly 13 digits, copied verbatim. Do not pad, truncate, or "fix" digits.
-7. DATES: prefer ISO YYYY-MM-DD; otherwise return DD/MM/YYYY exactly as written.
-8. STAMP DATE: only the date physically printed on or written into the certification stamp. Not other dates on the page.
-9. CERTIFICATION AUTHORITY: copy the exact wording on the stamp (e.g. "Commissioner of Oaths", police station name).
-10. EVIDENCE: for every critical field, return evidence_text that contains the exact surrounding label / stamp wording. If you cannot show evidence, set value to empty and confidence to a low number.
-11. HANDWRITTEN CONTENT: read pen marks and handwriting as carefully as printed text, but still copy verbatim.
-12. NEVER invent values to satisfy a field. Empty + low confidence is the correct answer when uncertain.
-
-OUTPUT:
-- Fill critical_fields for ALL of: ${CRITICAL_FIELD_KEYS.join(", ")}. Use empty value + low confidence if absent.
-- Fill extracted_info with the supporting fields above when visible. Leave others blank.
-- Fill stamp_date and police_station at the top level when applicable.
-- summary is a short plain-English description of what the document is and what fields you could read. NO pass/fail language.
-
-Respond using the extract_document_fields function.`;
-}
-
-async function extractFields(
-  apiKey: string,
-  model: string,
-  fileUrl: string,
-  fileName: string,
-  checklist: Checklist,
-  filenameHints: FilenameHints,
-  crossReferenceContext: CrossReferenceContext,
-): Promise<{ critical_fields: any; extracted_info: any; stamp_date?: string; police_station?: string; summary?: string } | null> {
-  const today = new Date().toISOString().split("T")[0];
-  const systemPrompt = buildExtractSystemPrompt(checklist, today);
-
-  const filenameHintParts: string[] = [];
-  if (filenameHints.candidateName) filenameHintParts.push(`candidate name "${filenameHints.candidateName}"`);
-  if (filenameHints.idNumber) filenameHintParts.push(`ID number "${filenameHints.idNumber}"`);
-  const filenameNote = filenameHintParts.length > 0
-    ? `Filename hints (supporting context only — do NOT let these override what the document actually says): ${filenameHintParts.join(", ")}.`
-    : `Filename hints: none parseable from "${fileName}".`;
-
-  const crossNote = crossReferenceContext.available
-    ? `Cross-reference candidate ID document: name "${crossReferenceContext.candidateName || "Unknown"}", ID "${crossReferenceContext.idNumber || "Unknown"}". Use only as supporting context; extract what the document actually shows.`
-    : `No cross-reference ID document is available. Extract only what this document shows.`;
-
-  const textPrompt = `Document type (already classified): "${checklist.doc_type}". Filename: "${fileName}". ${filenameNote} ${crossNote}\n\nExtract ONLY the requested fields from the actual document content. Read every page. Use exact visible text and provide evidence_text for every critical field. Respond using the extract_document_fields function.`;
-
-  const userContent = await buildVisualUserContent(fileUrl, fileName, textPrompt);
-  const result = await callOpenRouterWithTool(
-    apiKey,
-    model,
-    systemPrompt,
-    userContent,
-    buildExtractToolSchema(),
-    "extract_document_fields",
-    "CapaCiTi Document Extraction",
-  );
-  if (!result.ok) {
-    console.warn(`Extract pass failed (${result.status}): ${result.text.slice(0, 200)}`);
-    return null;
-  }
-  return result.args;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Stage 5 — Deterministic validation
-// ═══════════════════════════════════════════════════════════════════════════
-function runValidation(checklist: Checklist, ctx: ValidationCtx): Check[] {
-  const out: Check[] = [];
-  for (const rule of checklist.rules) {
-    const r = rule.validator(ctx);
-    if (!r) continue;
-    let name = rule.label;
-    // Optional rules can never fail — coerce to warning
-    let status = r.status;
-    if (!rule.required && status === "fail") status = "warning";
-    if (!rule.required && !name.toLowerCase().startsWith("optional")) name = `Optional - ${name}`;
-    out.push({ name, status, detail: r.detail });
-  }
-  return out;
-}
-
-function aggregateStatus(checks: Check[]): "pass" | "warning" | "fail" {
-  if (checks.some((c) => c.status === "fail")) return "fail";
-  if (checks.some((c) => c.status === "warning")) return "warning";
-  return "pass";
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Stage 6 — Cross-check critical values
-// ═══════════════════════════════════════════════════════════════════════════
-function normalizeName(s: string | null | undefined): string {
-  return (s || "").toLowerCase().replace(/[^a-z]/g, "");
-}
-
-function crossCheckCriticalFields(ctx: ValidationCtx): Check[] {
-  const out: Check[] = [];
-  const cn = ctx.critical.candidate_name?.value || ctx.critical.full_name?.value || "";
-  const fnHint = ctx.filenameHints.candidateName;
-  if (fnHint && cn) {
-    const a = normalizeName(cn);
-    const b = normalizeName(fnHint);
-    if (a && b && !(a.includes(b) || b.includes(a))) {
-      out.push({
-        name: "Filename vs document name match",
-        status: "warning",
-        detail: `Filename suggests "${fnHint}" but document content reads "${cn}". Verify visually.`,
-      });
-    }
-  }
-
-  const docId = (ctx.critical.id_number?.value || "").toString().replace(/\s/g, "");
-  const fnId = ctx.filenameHints.idNumber;
-  const xrefId = ctx.crossReferenceContext.idNumber;
-  if (fnId && docId && docId !== fnId) {
-    out.push({
-      name: "Filename vs document ID match",
-      status: "warning",
-      detail: `Filename ID "${fnId}" differs from document-extracted ID "${docId}".`,
-    });
-  }
-  if (xrefId && docId && docId !== xrefId) {
-    out.push({
-      name: "Candidate ID cross-reference",
-      status: "fail",
-      detail: `This document's ID "${docId}" does not match the candidate's ID document "${xrefId}".`,
-    });
-  }
-
-  // DOB ⇄ ID
-  if (isThirteenDigits(docId)) {
-    const dob = (ctx.critical.date_of_birth?.value || ctx.extracted_info?.date_of_birth || "").toString().trim();
-    if (dob) {
-      const d = parseFlexibleDate(dob);
-      if (d) {
-        const yy = docId.substring(0, 2);
-        const mm = docId.substring(2, 4);
-        const dd = docId.substring(4, 6);
-        const yearNum = parseInt(yy, 10);
-        const currentYearSuffix = new Date().getFullYear() % 100;
-        const fullYear = (yearNum <= currentYearSuffix ? 2000 : 1900) + yearNum;
-        const idDob = new Date(fullYear, parseInt(mm, 10) - 1, parseInt(dd, 10));
-        const same = idDob.getFullYear() === d.getFullYear() && idDob.getMonth() === d.getMonth() && idDob.getDate() === d.getDate();
-        if (!same) {
-          out.push({
-            name: "Date of birth vs ID number",
-            status: "fail",
-            detail: `Extracted DOB "${dob}" does not match the date-of-birth segment of ID number "${docId}".`,
-          });
-        }
-      }
-    }
-  }
-
-  return out;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Stage 7 — Confidence gating
-// ═══════════════════════════════════════════════════════════════════════════
-function gateConfidence(ctx: ValidationCtx, checks: Check[]): Check[] {
-  const out: Check[] = [];
-  const threshold = ctx.confidenceThreshold;
-  for (const key of CRITICAL_FIELD_KEYS) {
-    const f = ctx.critical[key];
-    if (!f) continue;
-    const val = (f.value || "").toString().trim();
-    if (!val) continue; // empty handled by checklist rules
-    if (typeof f.confidence === "number" && f.confidence < threshold) {
-      out.push({
-        name: `Needs human review: ${key.replace(/_/g, " ")}`,
-        status: "warning",
-        detail: `Extracted "${val}" with low confidence (${f.confidence}%). Evidence: "${(f.evidence_text || "").slice(0, 160)}". Please verify visually.`,
-      });
-    }
-  }
-  return out;
+  return response;
 }
 
 function extractToolCall(aiData: Record<string, any>) {
@@ -1558,220 +1096,193 @@ serve(async (req) => {
     const filenameHints = parseFilename(file_name);
     console.log(`Filename hints for "${file_name}":`, JSON.stringify(filenameHints));
 
-    const aiProvider = "openrouter";
+    const systemPrompt = buildSystemPrompt(confidenceThreshold, stampValidityMonths, strictMode, crossReferenceContext);
 
-    // Async mode is no longer supported by the staged pipeline; fall through to sync.
+    let aiResponse: Response;
+    let aiProvider = "openrouter";
+
+    // All AI processing goes through OpenRouter
     if (async_mode) {
-      console.log("async_mode requested but staged pipeline is sync-only; running sync.");
+      console.log(`Using OpenRouter ASYNC mode (model: ${aiModel}) for document:`, document_id);
+      const asyncResult = await analyzeWithOpenRouter(OPENROUTER_API_KEY, aiModel, systemPrompt, file_url, file_name, crossReferenceContext, filenameHints, true, document_id);
+      
+      if (asyncResult.ok) {
+        return new Response(JSON.stringify({
+          success: true,
+          document_id,
+          ai_provider: "openrouter-async",
+          ai_model: aiModel,
+          status: "processing_async",
+          message: "Document submitted for async processing. Results will be delivered via webhook.",
+        }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      } else {
+        console.log(`OpenRouter async failed (${asyncResult.status}), falling back to sync`);
+      }
     }
 
-    const today = new Date().toISOString().split("T")[0];
-    const programmeYear = new Date().getFullYear();
-
-    // ── Stage 2 + Stage B run in parallel (classification + handwriting) ──
-    console.log(`Stage 2: classifying with ${aiModel} for "${file_name}"`);
-    const [classifyResult, handwriting] = await Promise.all([
-      classifyDocument(OPENROUTER_API_KEY, aiModel, file_url, file_name),
+    // Sync mode with OpenRouter — run Stage A (validation) and Stage B (handwriting) in parallel
+    console.log(`Using OpenRouter (sync, model: ${aiModel}) for document analysis + handwriting pass`);
+    const [aiResponseRes, handwritingRes] = await Promise.all([
+      analyzeWithOpenRouter(OPENROUTER_API_KEY, aiModel, systemPrompt, file_url, file_name, crossReferenceContext, filenameHints),
       analyzeHandwriting(OPENROUTER_API_KEY, file_url, file_name),
     ]);
+    aiResponse = aiResponseRes;
+    const handwriting = handwritingRes;
 
-    // ── Decide doc_type from filename + classify + reclassify ──
-    let doc_type = "Other";
-    let classificationSource: "ai" | "filename" | "reclassify" | "unknown" = "unknown";
-    let classificationConfidence = 0;
-    let classificationEvidence = "";
-
-    if (classifyResult && classifyResult.document_type && classifyResult.document_type !== "Other" && (classifyResult.confidence ?? 0) >= 70) {
-      doc_type = classifyResult.document_type;
-      classificationSource = "ai";
-      classificationConfidence = classifyResult.confidence ?? 0;
-      classificationEvidence = classifyResult.classification_evidence || "";
-    } else if (filenameHints.docTypeHint) {
-      doc_type = filenameHints.docTypeHint;
-      classificationSource = "filename";
-      classificationConfidence = 80;
-      classificationEvidence = `Filename suffix indicates "${filenameHints.docTypeHint}".`;
-    } else {
-      // Stage 2b: content-based reclassification
-      console.log(`Stage 2b: running reclassification for "${file_name}"`);
-      const reclassified = await reclassifyDocument(OPENROUTER_API_KEY, file_url, file_name);
-      if (reclassified && reclassified.document_type && reclassified.document_type !== "Other" && (reclassified.confidence ?? 0) >= 70) {
-        doc_type = reclassified.document_type;
-        classificationSource = "reclassify";
-        classificationConfidence = reclassified.confidence ?? 0;
-        classificationEvidence = reclassified.classification_evidence || "";
-      } else if (classifyResult) {
-        // Keep whatever Stage 2 returned (likely Other) with its evidence
-        doc_type = classifyResult.document_type || "Other";
-        classificationSource = "ai";
-        classificationConfidence = classifyResult.confidence ?? 0;
-        classificationEvidence = classifyResult.classification_evidence || (reclassified?.classification_evidence || "");
+    if (!aiResponse.ok) {
+      const status = aiResponse.status;
+      if (status === 402) {
+        return new Response(JSON.stringify({
+          error: "credits_exhausted",
+          message: "Your OpenRouter credits have been exhausted. Please top up your credits at openrouter.ai to continue processing documents.",
+        }), {
+          status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
       }
-    }
-
-    console.log(`Classified "${file_name}" as "${doc_type}" via ${classificationSource} (${classificationConfidence}%)`);
-
-    // ── Stage 3: pick the checklist ──
-    const checklist = getChecklist(doc_type);
-
-    // ── Stage 4: strict, checklist-scoped extraction ──
-    const extractResult = await extractFields(
-      OPENROUTER_API_KEY,
-      aiModel,
-      file_url,
-      file_name,
-      checklist,
-      filenameHints,
-      crossReferenceContext,
-    );
-
-    if (!extractResult) {
-      // Extraction failed — record a graceful error result rather than throwing
-      const errorChecks: Check[] = [
-        { name: "Document extraction", status: "fail", detail: "AI extraction call failed. Please re-upload or retry." },
-      ];
-      await supabase.from("documents").update({
-        document_type: doc_type,
-        candidate_name_extracted: filenameHints.candidateName || "Unknown",
-        confidence_score: 0,
-        validation_status: "fail",
-        issues: ["AI extraction failed"],
-        validation_details: {
-          summary: "AI extraction call failed.",
-          checks: errorChecks,
-          extracted_id_number: filenameHints.idNumber || null,
-          stamp_date: null,
-          stamp_date_valid: null,
-          police_station: null,
-          certification_authority: null,
-          extracted_info: filenameHints.idNumber ? { id_number: filenameHints.idNumber } : null,
-          ai_provider: aiProvider,
-          ai_model: aiModel,
-          sa_id_validation: null,
-          handwriting: handwriting || null,
-          handwriting_model: handwriting ? "google/gemini-2.5-pro" : null,
-          classification: { document_type: doc_type, confidence: classificationConfidence, evidence: classificationEvidence, source: classificationSource },
-          critical_fields: null,
-        },
-        processed_at: new Date().toISOString(),
-      }).eq("id", document_id);
-
-      return new Response(JSON.stringify({
-        success: false,
-        document_id,
-        ai_provider: aiProvider,
-        ai_model: aiModel,
-        document_type: doc_type,
-        validation_status: "fail",
-        summary: "AI extraction call failed.",
-      }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
-
-    // Normalise critical_fields (ensure all keys present with shape)
-    const critical: Record<string, { value: string | null; confidence: number; evidence_text: string; page_number?: number | null }> = {};
-    for (const k of CRITICAL_FIELD_KEYS) {
-      const f = extractResult.critical_fields?.[k] || {};
-      critical[k] = {
-        value: typeof f.value === "string" ? f.value : null,
-        confidence: typeof f.confidence === "number" ? f.confidence : 0,
-        evidence_text: typeof f.evidence_text === "string" ? f.evidence_text : "",
-        page_number: typeof f.page_number === "number" ? f.page_number : null,
-      };
-    }
-
-    const extractedInfoRaw = extractResult.extracted_info || {};
-    // Promote handwriting into critical fields when extractor left them blank
-    if (handwriting) {
-      const hwName = [handwriting.handwritten_name, handwriting.handwritten_surname]
-        .filter((v: any) => typeof v === "string" && v.trim()).join(" ").trim();
-      if (hwName && !(critical.full_name.value || "").trim()) {
-        critical.full_name.value = hwName;
-        critical.full_name.evidence_text = `Recovered from handwriting pass (confidence ${Math.max(handwriting.field_confidences?.name || 0, handwriting.field_confidences?.surname || 0)}%).`;
-        critical.full_name.confidence = Math.max(handwriting.field_confidences?.name || 0, handwriting.field_confidences?.surname || 0);
+      if (status === 429) {
+        return new Response(JSON.stringify({
+          error: "rate_limited",
+          message: "Rate limit reached. Please wait a moment and try again.",
+        }), {
+          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
       }
-      const hwId = (handwriting.handwritten_id_number || "").replace(/\D/g, "");
-      if (/^\d{13}$/.test(hwId) && !(critical.id_number.value || "").trim()) {
-        critical.id_number.value = hwId;
-        critical.id_number.evidence_text = `Recovered from handwriting pass (confidence ${handwriting.field_confidences?.id_number || 0}%).`;
-        critical.id_number.confidence = handwriting.field_confidences?.id_number || 0;
+      const errText = await aiResponse.text();
+      console.error(`OpenRouter AI error (model: ${aiModel}):`, status, errText);
+      if (status === 400) {
+        return new Response(JSON.stringify({
+          error: "ai_bad_request",
+          message: "The AI service could not process this file. It may be an unsupported format, too large, or corrupted. Please re-upload a clear PDF or image.",
+          details: errText.slice(0, 500),
+        }), {
+          status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
       }
+      throw new Error(`OpenRouter AI error: ${status}`);
     }
 
-    // Build the validation context
-    const ctx: ValidationCtx = {
-      doc_type,
-      fileName: file_name,
-      filenameHints,
-      critical,
-      extracted_info: normalizeExtractedInfo(extractedInfoRaw) || extractedInfoRaw,
-      handwriting,
-      crossReferenceContext,
-      stampValidityMonths,
-      programmeYear,
-      confidenceThreshold,
-    };
+    const aiData = await aiResponse.json();
+    const toolCall = extractToolCall(aiData);
 
-    // ── Stage 5: deterministic rule-based validation ──
-    const ruleChecks = runValidation(checklist, ctx);
-
-    // ── Stage 6: cross-check critical values ──
-    const crossChecks = crossCheckCriticalFields(ctx);
-
-    // ── Stage 7: confidence gating ──
-    const confidenceChecks = gateConfidence(ctx, ruleChecks);
-
-    // Classification provenance check (informational)
-    const classificationCheck: Check = classificationSource === "ai" || classificationSource === "reclassify"
-      ? { name: "Document type from content", status: "pass", detail: `Classified as "${doc_type}" via ${classificationSource} (${classificationConfidence}%)${classificationEvidence ? `: "${classificationEvidence.slice(0, 200)}"` : ""}.` }
-      : classificationSource === "filename"
-        ? { name: "Document type from filename", status: "pass", detail: `Inferred from filename suffix as "${doc_type}".` }
-        : { name: "Document type unrecognised", status: "warning", detail: `Could not classify the document. Treating as "Other".` };
-
-    const allChecks: Check[] = [classificationCheck, ...ruleChecks, ...crossChecks, ...confidenceChecks];
-
-    // Build the legacy `extracted` object the rest of the function (and UI) expects
-    const candidateNameOut = (critical.candidate_name.value || critical.full_name.value || ctx.extracted_info?.full_name || filenameHints.candidateName || "Unknown").toString().trim() || "Unknown";
-    const idOut = (critical.id_number.value || ctx.extracted_info?.id_number || filenameHints.idNumber || "").toString().replace(/\s/g, "");
-
-    const overallStatus = aggregateStatus(allChecks);
-    const issues = allChecks.filter((c) => c.status === "fail").map((c) => `${c.name}: ${c.detail}`);
-
-    // Average confidence across populated critical fields → confidence_score
-    const populated = Object.values(critical).filter((f) => (f.value || "").toString().trim());
-    const avgConfidence = populated.length > 0
-      ? Math.round(populated.reduce((sum, f) => sum + (f.confidence || 0), 0) / populated.length)
-      : 50;
-
-    const extracted = {
-      document_type: doc_type,
-      candidate_name: candidateNameOut,
-      confidence: avgConfidence,
-      validation_status: overallStatus as "pass" | "warning" | "fail",
-      checks: allChecks as { name: string; status: string; detail: string }[],
-      issues,
-      summary: extractResult.summary || `Document classified as ${doc_type}. ${allChecks.length} checks performed.`,
-      extracted_id_number: idOut || null,
-      stamp_date: critical.stamp_date.value || extractResult.stamp_date || null,
+    let extracted = {
+      document_type: "Other",
+      candidate_name: "Unknown",
+      confidence: 50,
+      validation_status: "warning",
+      checks: [] as { name: string; status: string; detail: string }[],
+      issues: [] as string[],
+      summary: "Could not fully analyze document",
+      extracted_id_number: null as string | null,
+      stamp_date: null as string | null,
       stamp_date_valid: null as boolean | null,
-      police_station: extractResult.police_station || null,
-      certification_authority: critical.certification_authority.value || null,
-      extracted_info: { ...(ctx.extracted_info || {}) } as Record<string, any>,
-      // Additive — persisted in validation_details for future UI work
-      __classification: { document_type: doc_type, confidence: classificationConfidence, evidence: classificationEvidence, source: classificationSource },
-      __critical_fields: critical,
+      police_station: null as string | null,
+      certification_authority: null as string | null,
+      extracted_info: null as Record<string, any> | null,
     };
 
-    // Mirror critical fields back into legacy extracted_info shape for UI compatibility
-    if (critical.full_name.value && !extracted.extracted_info.full_name) extracted.extracted_info.full_name = critical.full_name.value;
-    if (idOut && !extracted.extracted_info.id_number) extracted.extracted_info.id_number = idOut;
-    if (critical.date_of_birth.value && !extracted.extracted_info.date_of_birth) extracted.extracted_info.date_of_birth = critical.date_of_birth.value;
+    const toolArguments = toolCall?.function?.arguments || toolCall?.arguments;
+    if (toolArguments) {
+      try {
+        extracted = JSON.parse(toolArguments);
+      } catch (e) {
+        console.error("Failed to parse AI response:", e);
+      }
+    }
 
-    // Compute stamp_date_valid based on the rule outcome (whichever applies)
-    const stampCheck = allChecks.find((c) => c.name.toLowerCase().includes("stamp date"));
-    if (stampCheck) extracted.stamp_date_valid = stampCheck.status === "pass";
+    // ── Filename-wins override for candidate identification ──
+    // The admin named the file, so trust filename for candidate_name, ID, and doc type.
+    // Surface mismatches as warnings instead of silently overriding.
+    const filenameOverrideChecks: { name: string; status: string; detail: string }[] = [];
+    const aiCandidateName = (extracted.candidate_name || "").trim();
+    const aiIdNumber = (extracted.extracted_id_number || extracted.extracted_info?.id_number || "").toString().replace(/\s/g, "");
+
+    if (filenameHints.candidateName) {
+      const filenameNameNorm = filenameHints.candidateName.toLowerCase().replace(/\s+/g, "");
+      const aiNameNorm = aiCandidateName.toLowerCase().replace(/\s+/g, "");
+      const namesAgree = aiNameNorm && (filenameNameNorm.includes(aiNameNorm) || aiNameNorm.includes(filenameNameNorm));
+
+      if (!aiCandidateName || aiCandidateName.toLowerCase() === "unknown") {
+        extracted.candidate_name = filenameHints.candidateName;
+      } else if (!namesAgree) {
+        // Conflict — filename wins, raise a warning
+        filenameOverrideChecks.push({
+          name: "Filename vs document name match",
+          status: "warning",
+          detail: `Filename indicates "${filenameHints.candidateName}" but document content reads "${aiCandidateName}". Using filename for grouping; please verify.`,
+        });
+        extracted.candidate_name = filenameHints.candidateName;
+      }
+    }
+
+    if (filenameHints.idNumber) {
+      if (!aiIdNumber || aiIdNumber.length !== 13) {
+        extracted.extracted_id_number = filenameHints.idNumber;
+        extracted.extracted_info = { ...(extracted.extracted_info || {}), id_number: filenameHints.idNumber };
+      } else if (aiIdNumber !== filenameHints.idNumber) {
+        filenameOverrideChecks.push({
+          name: "Filename vs document ID number match",
+          status: "warning",
+          detail: `Filename ID "${filenameHints.idNumber}" does not match document ID "${aiIdNumber}". Using filename ID; please verify.`,
+        });
+        extracted.extracted_id_number = filenameHints.idNumber;
+        extracted.extracted_info = { ...(extracted.extracted_info || {}), id_number: filenameHints.idNumber };
+      }
+    }
+
+    // If AI returned "Other" but filename has a recognised doc type suffix, prefer the filename type
+    if (filenameHints.docTypeHint && (extracted.document_type === "Other" || !extracted.document_type)) {
+      filenameOverrideChecks.push({
+        name: "Document type from filename",
+        status: "pass",
+        detail: `Document type inferred from filename suffix as "${filenameHints.docTypeHint}".`,
+      });
+      extracted.document_type = filenameHints.docTypeHint;
+    }
+
+    // ── Stage A2: content-based reclassification when AI said "Other" and filename gave no hint ──
+    if (
+      (extracted.document_type === "Other" || !extracted.document_type) &&
+      !filenameHints.docTypeHint
+    ) {
+      console.log(`Stage A2: running content-based reclassification for "${file_name}"`);
+      const reclassified = await reclassifyDocument(OPENROUTER_API_KEY, file_url, file_name);
+      if (reclassified) {
+        const conf = typeof reclassified.confidence === "number" ? reclassified.confidence : 0;
+        const newType = (reclassified.document_type || "").trim();
+        const evidence = (reclassified.classification_evidence || "").trim();
+        if (newType && newType !== "Other" && conf >= 70) {
+          extracted.document_type = newType;
+          filenameOverrideChecks.push({
+            name: "Document type from content",
+            status: "pass",
+            detail: `Re-classified as "${newType}" (confidence ${conf}%) based on document content${evidence ? `: "${evidence.slice(0, 200)}"` : ""}.`,
+          });
+        } else {
+          filenameOverrideChecks.push({
+            name: "Document type unrecognised",
+            status: "warning",
+            detail: evidence
+              ? `No recognised Capaciti document headings or form codes found. Re-classification evidence: "${evidence.slice(0, 200)}".`
+              : `No recognised Capaciti document headings or form codes found. Document remains "Other".`,
+          });
+        }
+      }
+    }
+
+    if (filenameOverrideChecks.length > 0) {
+      extracted.checks = [...(extracted.checks || []), ...filenameOverrideChecks];
+    }
+
+    // ── Stage B reconciliation: handwriting recognition pass ──
+    const handwritingChecks = reconcileHandwriting(extracted, handwriting);
+    if (handwritingChecks.length > 0) {
+      extracted.checks = [...(extracted.checks || []), ...handwritingChecks];
+    }
 
     // ── SA ID Structural Validation (Luhn checksum) ──
-    extracted.extracted_info = normalizeExtractedInfo(extracted.extracted_info) || extracted.extracted_info;
+    extracted.extracted_info = normalizeExtractedInfo(extracted.extracted_info) ?? null;
     const idToValidate = extracted.extracted_id_number || extracted.extracted_info?.id_number;
     let saIdValidation: Record<string, any> | null = null;
 
@@ -1887,21 +1398,16 @@ serve(async (req) => {
         sa_id_validation: saIdValidation,
         handwriting: handwriting || null,
         handwriting_model: handwriting ? "google/gemini-2.5-pro" : null,
-        classification: extracted.__classification,
-        critical_fields: extracted.__critical_fields,
       },
       processed_at: new Date().toISOString(),
     }).eq("id", document_id);
 
-    const { __classification, __critical_fields, ...extractedPublic } = extracted;
     return new Response(JSON.stringify({
       success: true,
       document_id,
       ai_provider: aiProvider,
       ai_model: aiModel,
-      ...extractedPublic,
-      classification: __classification,
-      critical_fields: __critical_fields,
+      ...extracted,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

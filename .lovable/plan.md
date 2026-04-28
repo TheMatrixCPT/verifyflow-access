@@ -1,172 +1,79 @@
+# Stop documents from being misclassified as "Other"
 
-# Strict staged validation pipeline for `process-document`
+The screenshot shows `AmkeleYamani_9912125698081_Proof of Address.pdf` ending up as **Other**. The edge function logs confirm the root cause:
 
-Refactor `supabase/functions/process-document/index.ts` only. Keep the current `validation_details` shape so `CandidateModal`, `CandidateCard`, `SessionDetail`, and `generateReport.ts` keep working unchanged. No DB migration. No UI change.
-
-## New pipeline
-
-```text
-Stage 1  Filename pre-check  ── parseFilename() (already exists, kept as supporting context)
-Stage 2  Classification      ── classifyDocument()       NEW (no extraction, no validation)
-Stage 2b Reclassify          ── reclassifyDocument()     EXISTING (only when Stage 2 = Other & no filename hint)
-Stage 3  Checklist selection ── CHECKLISTS[doc_type]     NEW (deterministic table)
-Stage 4  Strict extraction   ── extractFields()          NEW (per-checklist field list, evidence required)
-Stage 5  Rule-based validation ── runValidation()        NEW (deterministic pass/warning/fail)
-Stage 6  Cross-check         ── crossCheckCriticalFields() NEW (filename ⇄ extracted ⇄ ID context)
-Stage 7  Confidence gating   ── gateConfidence()         NEW (downgrade pass→warning when conf < threshold)
-Stage B  Handwriting (parallel with Stage 4) ── analyzeHandwriting() EXISTING, kept
+```
+Filename hints for "AmkeleYamani_9912125698081_Proof of Address.pdf":
+  {"docTypeHint":null, ...}
 ```
 
-Stages 2, 4, B run in parallel where possible. Final assembly produces the same `extracted` object the rest of the function already writes to `validation_details`.
+So no build/runtime error — the edge function ran cleanly. The bug is logic-only inside `supabase/functions/process-document/index.ts`.
 
-## Stage-by-stage changes
+## Root cause
 
-### Stage 1 — Filename pre-check (no change)
-`parseFilename()` and `SUFFIX_TO_DOCTYPE` already exist and work. Output remains supporting context only — never overrides document content for non-identification fields.
+1. **Filename suffix dictionary is too narrow.** Tokens after the ID get joined and normalized: `"Proof of Address"` → `"proofofaddress"`. That key isn't in `SUFFIX_TO_DOCTYPE`, and `matchPartialSuffix` has no entry containing `"proof"` or `"address"`, so `docTypeHint` becomes `null`. The same gap will hit `"Bank Confirmation"`, `"Police Clearance"`, `"Income Tax Certificate"` (only matches by accident on `"tax"`), `"ID Copy"`, etc.
+2. **`matchPartialSuffix` is order-dependent**, not longest-match. `"taxcertificate"` matches `"tax"` first and short-circuits — fragile.
+3. **No content-based fallback when AI returns "Other"** and the filename gives no hint. The "Other" verdict stands even when the document body clearly says "Proof of Residence" or has a SAPS letterhead.
 
-### Stage 2 — Classification only
-Replace the current monolithic `extract_document_info` first call with a small **classify-only** OpenRouter call:
+## What changes (only `supabase/functions/process-document/index.ts`)
 
-- New tool schema `classify_document` with three properties:
-  - `document_type` (enum = the 16 Capaciti types + Other)
-  - `confidence` (0–100)
-  - `classification_evidence` (exact heading / form code / letterhead / title text)
-- New system prompt scoped to: "look only at headings, form codes (EEA1, TCX, IRP5, BA), letterheads (SARS, SAPS, banks, training providers), document titles, signatory blocks. Do NOT extract names or fields. Return Other only as a last resort."
-- Model: `google/gemini-2.5-flash` (cheap, fast — classification is a small task).
-- If confidence ≥ 70 and not Other → use this type.
-- If Other and filename has docTypeHint → use the filename type.
-- If Other and no filename hint → run Stage 2b reclassify (existing `reclassifyDocument`, kept; it already targets `gemini-2.5-pro`).
+### 1. Expand `SUFFIX_TO_DOCTYPE` with real-world phrases
+Add aliases observed in the logs and common admin variants. New entries:
+- `proofofaddress`, `proofofresidence`, `addressproof`, `residenceproof`, `utilitybill`, `municipalbill` → **Bank Letter** *(Capaciti's existing "proof of residence/address" slot — confirmed by question 1)*
+- `incometax`, `incometaxcertificate`, `sarsletter`, `taxnumberletter`, `irp5certificate` → **Tax Certificate**
+- `mieconsent`, `mieverification`, `mieclearance`, `backgroundcheck` → **MIE Verification**
+- `signedofferletter`, `offerofemployment`, `employmentoffer` → **Offer Letter**
+- `bankstatement`, `bankconfirmation`, `bankaccountconfirmation` → **Bank Letter**
+- `idcopy`, `idphoto`, `saidcopy`, `greenid`, `smartid`, `iddocument` → **Certified ID**
+- `policeclearance`, `saps`, `affidavitofunemployment` → **Unemployment Affidavit**
+- `matriccertificate`, `seniorcertificate`, `nsc`, `ieb` → **Qualification Matric**
+- `disabilitycertificate`, `disabilityconfirmation` → **PWDS Confirmation of Disability**
+- `socialmediaconsentform`, `mediaconsent`, `photographyconsent` → **Social Media Consent**
+- `cvresume`, `curriculumvitae` → **CV**
+- `capaciticonsent`, `capacitiagreement` → **Capaciti Declaration**
+- `fixedtermcontract`, `employmentftc` → **Employment Contract FTC**
+- `completioncertificate`, `trainingcompletion` → **Certificate of Completion**
+- `eea1employmentequity`, `employmentequityform` → **EEA1 Form**
 
-### Stage 3 — Checklist selection
-Add a typed `CHECKLISTS` constant with one entry per document type. Each entry declares:
+### 2. Replace `matchPartialSuffix` with longest-key-wins
+Iterate all keys, pick the **longest** key contained in the suffix. Guarantees `"taxcertificate"` beats `"tax"`, `"capacitideclaration"` beats `"declaration"`, `"proofofaddress"` beats `"address"` should both ever exist.
 
-```ts
-type ChecklistRule = {
-  id: string;                     // stable id used as check name
-  label: string;                  // human-readable check name
-  required: boolean;              // false → emitted as "Optional - …"
-  fields: string[];               // fields the AI must extract for this rule
-  validator: (ctx) => RuleResult; // deterministic check (Stage 5)
-};
-type Checklist = {
-  doc_type: string;
-  fields: string[];               // union of fields needed for extraction (Stage 4)
-  rules: ChecklistRule[];
-};
+### 3. Add Stage A2 — content-based reclassification
+After Stage A, if **all** of these hold:
+- `extracted.document_type === "Other"`
+- `filenameHints.docTypeHint` is `null`
+
+…run a focused second OpenRouter call using `google/gemini-2.5-pro` with a tight prompt:
+
+> "You previously classified this document as Other. Re-examine ONLY the visual headings, footers, form codes (EEA1, TCX, IRP5, BA), letterheads (SARS, SAPS, banks, training providers), and title text (Affidavit, Bank Letter, Proof of Address, Curriculum Vitae, Certificate of Completion). Pick the single best match from the 16 Capaciti types. Return Other ONLY if nothing recognisable exists. Provide `classification_evidence` (the exact text relied on) and `confidence` 0-100."
+
+Use a dedicated tool schema `reclassify_document` with `document_type` (same enum), `confidence`, `classification_evidence`. Apply the result when `confidence >= 70` AND not "Other":
+- Override `extracted.document_type`
+- Append check: `{ name: "Document type from content", status: "pass", detail: "Re-classified as <type> based on: <evidence>" }`
+
+If reclassify still says "Other" with high confidence, append a `warning` check `"No recognisable Capaciti document headings or form codes found"` so admins can see the AI looked.
+
+### 4. Tighten the Stage A system prompt
+Add one paragraph in `buildSystemPrompt`:
+
+> "Choose `Other` ONLY as a last resort. Before picking `Other`, scan for: (a) form codes (EEA1, TCX, IRP5, BA); (b) letterheads (SARS, SAPS, banks); (c) titles ("Affidavit", "Bank Letter", "Proof of Address/Residence", "Certificate of Completion", "Curriculum Vitae"); (d) signatory blocks ("Commissioner of Oaths"). If any point to one of the 16 Capaciti types, pick that type even when the filename gives no hint."
+
+### Resulting hierarchy
 ```
-
-Initial checklist content is taken from the existing `buildSystemPrompt` per-type sections (Certified ID, Unemployment Affidavit, EEA1, PWDS, Social Media Consent, BA, Offer Letter, FTC, Certificate of Completion, Bank Letter, TCX, CV, Capaciti Declaration, Qualification/Matric, Tax Certificate, MIE Verification, Other) — same rules, now expressed in code rather than prose.
-
-### Stage 4 — Strict, checklist-scoped extraction
-New tool schema `extract_document_fields`:
-
-- A `critical_fields` object whose properties are **structured**:
-  ```ts
-  {
-    candidate_name: { value, confidence, evidence_text, page_number? },
-    full_name:      { value, confidence, evidence_text, page_number? },
-    id_number:      { value, confidence, evidence_text, page_number? },
-    date_of_birth:  { value, confidence, evidence_text, page_number? },
-    stamp_date:     { value, confidence, evidence_text, page_number? },
-    certification_authority: { value, confidence, evidence_text, page_number? },
-  }
-  ```
-- A flat `extracted_info` object covering the existing UI fields (`gender`, `race`, `nationality`, `foreign_national`, `foreign_national_support_date`, `address`, `phone_number`, `email`, `employer`, `job_title`, `qualification_name`, `institution`, `issue_date`, `expiry_date`, `reference_number`, `signature_present`, `additional_notes`) — **kept identical** so the UI continues to render.
-- Per-doc-type extraction prompt is built dynamically from `CHECKLISTS[doc_type].fields`, so the AI only extracts what the checklist actually needs.
-- Strict prompt rules added:
-  - Use only exact visible text. Do not infer.
-  - Do not combine fragments unless they are part of the same labeled field.
-  - If ambiguous → return `null` / empty string. Never invent.
-  - For `candidate_name` / `full_name`: copy the printed/handwritten name **verbatim**. Do not add or expand middle names unless they are printed in the same labeled field.
-  - Use the closest labeled field; if a value appears in two places, prefer the one with a clear label.
-
-After parsing, the structured `critical_fields` are flattened back into the existing legacy fields so `validation_details` stays backward compatible:
-- `extracted.extracted_id_number` ← `critical_fields.id_number.value`
-- `extracted.extracted_info.full_name` ← `critical_fields.full_name.value`
-- `extracted.extracted_info.id_number` ← `critical_fields.id_number.value`
-- `extracted.extracted_info.date_of_birth` ← `critical_fields.date_of_birth.value`
-- `extracted.stamp_date` ← `critical_fields.stamp_date.value`
-- `extracted.certification_authority` ← `critical_fields.certification_authority.value`
-- `extracted.candidate_name` ← `critical_fields.candidate_name.value`
-
-The full `critical_fields` object is also persisted under `validation_details.critical_fields` so future UI work can use the evidence/confidence — additive, no UI change required.
-
-### Stage 5 — Deterministic rule-based validation
-New `runValidation(checklist, extracted, handwriting, settings)` walks `checklist.rules` and produces `{ name, status, detail }[]`. The model **never** decides pass/fail any more — it only supplies evidence.
-
-Rule helpers (pure functions, in-file):
-
-- `isThirteenDigits(s)`
-- `isValidISODate(s)` / `isWithinMonths(date, months)` / `isWithinYear(date, year)`
-- `signaturePresent(handwriting, label)` — reads `handwriting.signature_blocks`
-- `initialsOnEveryPage(handwriting)` — reads `handwriting.initials_per_page`
-- `markedNo(handwriting, "TCX Q1")` — reads `handwriting.marks`
-- `filenameMatchesConvention(filenameHints, doc_type)` — emits the existing "File naming convention" warning
-
-Each rule returns `pass` / `warning` / `fail`; required rules can fail, optional rules can only warning. Aggregate to `validation_status`:
-- any required `fail` → `fail`
-- else any `warning` → `warning`
-- else → `pass`
-
-This replaces the AI-supplied `checks`/`validation_status`/`issues`. The model's narrative `summary` is still used as a human-readable blurb but is not authoritative.
-
-### Stage 6 — Cross-check critical values
-New `crossCheckCriticalFields(filenameHints, criticalFields, handwriting, crossReferenceContext)` produces additional checks:
-
-- `candidate_name` ⇄ `filenameHints.candidateName` ⇄ handwritten name → mismatch = `warning`
-- `id_number` ⇄ `filenameHints.idNumber` ⇄ candidate-cross-reference ID ⇄ DOB derived from ID → mismatch = `warning` or `fail` if all three sources disagree
-- `date_of_birth` ⇄ ID-derived DOB → mismatch = `fail`
-- `stamp_date` ⇄ checklist's stamp rule (year for Certified ID; ≤ N months for everything else) → `fail` when out of range
-- `certification_authority` present when checklist requires a Commissioner of Oaths block
-
-Resolution rule when sources conflict: prefer the source with the highest confidence + clearest evidence; **never** silently overwrite a high-confidence extracted value with a filename guess. Filename only wins for identification when the extracted value is empty or low-confidence.
-
-### Stage 7 — Confidence gating
-New `gateConfidence(criticalFields, threshold)`:
-- For each critical field, if `confidence < threshold` (default = `settings.confidence_threshold`, fallback 70) **and** the field is required by the checklist, downgrade its rule from `pass` to `warning` and append a "Needs human review" check with the evidence_text.
-- Never overwrite a clearly-supported high-confidence field with a low-confidence guess from another source (filename / handwriting).
-
-## Prompt changes (`buildSystemPrompt` and the new prompts)
-
-- Existing `buildSystemPrompt` shrinks dramatically: it now only feeds **Stage 4** and explicitly says:
-  - "The document type is already known: `<doc_type>`. Do NOT re-classify."
-  - "Extract ONLY the fields listed below: `<fields from checklist>`."
-  - "Use exact visible text. Do not infer. Return null if uncertain."
-  - "Do not decide pass/fail. Validation is performed deterministically after extraction."
-- New `CLASSIFY_SYSTEM_PROMPT` for Stage 2 (headings/codes/letterheads only, no extraction).
-- The reclassify prompt already exists and is kept.
-- The handwriting prompt already exists and is kept.
-
-## Backward compatibility (UI must keep working)
-
-`validation_details` continues to contain:
-- `summary` (string)
-- `checks` (array of `{ name, status, detail }`) — now produced by deterministic rules + cross-checks + handwriting + classification-evidence
-- `extracted_id_number`, `stamp_date`, `stamp_date_valid`, `police_station`, `certification_authority`
-- `extracted_info` (same flat shape as today)
-- `ai_provider`, `ai_model`, `sa_id_validation`, `handwriting`, `handwriting_model`
-
-Additive (new, optional):
-- `validation_details.critical_fields` — structured `{ value, confidence, evidence_text, page_number? }` per critical field
-- `validation_details.classification` — `{ document_type, confidence, evidence, source: "ai" | "filename" | "reclassify" }`
-
-Nothing in `src/components/CandidateModal.tsx`, `src/components/CandidateCard.tsx`, `src/pages/SessionDetail.tsx`, or `src/lib/generateReport.ts` needs to change.
-
-## Files modified
-
-- `supabase/functions/process-document/index.ts` (only file touched)
-- Memory: update `mem://features/validation-rules` and `mem://tech/ai-stack` to describe the new staged pipeline.
+Filename suffix (Stage A1)  ▶  Stage A AI  ▶  Stage A2 reclassify (if Other & no hint)  ▶  Stage B handwriting
+```
+Filename still wins for **name & ID**. Doc type now has a content-based safety net before falling back to "Other".
 
 ## Out of scope
+- Assessment Tools system (untouched)
+- DB schema (no migration; results stay in existing `validation_details` JSON)
+- UI changes (the new check renders automatically in the existing checks list)
 
-- DB schema changes
-- UI changes (additive `critical_fields` are written but not yet rendered — separate request)
-- Assessment Tools system
-- Async webhook flow stays as-is (the staged pipeline runs in sync mode; async path simply calls Stage 2 + Stage 4 inside the existing webhook handler in a follow-up if needed)
+## Files modified
+- `supabase/functions/process-document/index.ts`
+- `mem://features/validation-rules` — note expanded mapping & Stage A2 rule
+- `mem://tech/ai-stack` — note Stage A2 uses `google/gemini-2.5-pro`
 
-## Risks & mitigations
+## One clarifying question
 
-- **Two AI calls per document** (classify + extract) instead of one — slightly slower. Mitigation: classify uses `gemini-2.5-flash`, extract continues to use the configured model; both still run in parallel with handwriting.
-- **Strict extraction may leave more fields blank.** That is the point — blank + warning is better than confidently wrong. Cross-check + handwriting reconciliation fill the gaps where evidence exists.
-- **Checklist coverage** — the initial `CHECKLISTS` is a direct port of the current prose rules, so behaviour stays equivalent on day one and only gets stricter where we add deterministic checks (ID Luhn already exists and is preserved).
-
+Capaciti's 16-type list does not contain a literal "Proof of Address" type. I'll ask which existing type these proof-of-residence documents should map to so the alias table is correct.
