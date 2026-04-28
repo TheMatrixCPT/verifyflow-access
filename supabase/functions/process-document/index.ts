@@ -1837,6 +1837,8 @@ serve(async (req) => {
         sa_id_validation: saIdValidation,
         handwriting: handwriting || null,
         handwriting_model: handwriting ? "google/gemini-2.5-pro" : null,
+        classification: extracted.__classification,
+        critical_fields: extracted.__critical_fields,
       },
       processed_at: new Date().toISOString(),
     }).eq("id", document_id);
