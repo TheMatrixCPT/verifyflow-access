@@ -1771,7 +1771,7 @@ serve(async (req) => {
     if (stampCheck) extracted.stamp_date_valid = stampCheck.status === "pass";
 
     // ── SA ID Structural Validation (Luhn checksum) ──
-    extracted.extracted_info = normalizeExtractedInfo(extracted.extracted_info) ?? null;
+    extracted.extracted_info = normalizeExtractedInfo(extracted.extracted_info) || extracted.extracted_info;
     const idToValidate = extracted.extracted_id_number || extracted.extracted_info?.id_number;
     let saIdValidation: Record<string, any> | null = null;
 
