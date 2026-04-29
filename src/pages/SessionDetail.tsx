@@ -18,9 +18,18 @@ import type { DocumentData, CandidateData } from "@/components/CandidateCard";
 
 type FilterType = "all" | "pass" | "fail";
 
+function effectiveStatus(doc: DocumentData): "pass" | "warning" | "fail" {
+  return doc.overridden ? "pass" : doc.status;
+}
+
 function getDocumentsForFilter(documents: DocumentData[], filter: FilterType): DocumentData[] {
   if (filter === "all") return documents;
-  return documents.filter((document) => document.status === filter);
+  if (filter === "pass") return documents.filter((d) => effectiveStatus(d) === "pass");
+  // "fail" tab includes both fail and warning (non-overridden)
+  return documents.filter((d) => {
+    const s = effectiveStatus(d);
+    return s === "fail" || s === "warning";
+  });
 }
 
 function buildDocumentTypeLabel(documents: DocumentData[]): string {
