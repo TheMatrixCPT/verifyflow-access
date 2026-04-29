@@ -497,6 +497,28 @@ const DocumentSection = ({ doc, onReplaceDocument, candidateName }: { doc: Docum
         </div>
       )}
     </div>
+
+    <AlertDialog open={overrideOpen} onOpenChange={setOverrideOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Approve this document?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Approve <span className="font-semibold text-foreground">{doc.type}</span> despite the warnings? It will be moved to the Validated tab and counted as passed.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={overriding}>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            className="bg-success text-success-foreground hover:bg-success/90"
+            onClick={(e) => { e.preventDefault(); handleOverride(); }}
+            disabled={overriding}
+          >
+            {overriding ? "Approving…" : "Approve"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 };
 
