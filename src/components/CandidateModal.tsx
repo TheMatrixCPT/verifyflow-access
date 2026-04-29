@@ -242,6 +242,7 @@ const DocumentSection = ({ doc, onReplaceDocument, candidateName }: { doc: Docum
   const extractedInfo = doc.extractedInfo as ExtractedInfo | undefined;
 
   return (
+    <>
     <div className={`rounded-lg border border-border ${docCfg.bg}`}>
       <div
         className="flex items-center justify-between p-3 cursor-pointer"
