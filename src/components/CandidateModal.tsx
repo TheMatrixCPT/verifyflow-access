@@ -75,8 +75,32 @@ const InfoRow = ({ icon: Icon, label, value }: { icon: React.ElementType; label:
 const DocumentSection = ({ doc, onReplaceDocument, candidateName }: { doc: DocumentData; onReplaceDocument?: (doc: DocumentData) => void; candidateName?: string }) => {
   const [expanded, setExpanded] = useState(false);
   const [viewingDoc, setViewingDoc] = useState(false);
-  const docCfg = docStatusIcon[doc.status as keyof typeof docStatusIcon] || docStatusIcon.warning;
+  const [overrideOpen, setOverrideOpen] = useState(false);
+  const [overriding, setOverriding] = useState(false);
+  const queryClient = useQueryClient();
+  const isOverridden = !!doc.overridden;
+  const effectiveDocStatus = isOverridden ? "pass" : doc.status;
+  const docCfg = docStatusIcon[effectiveDocStatus as keyof typeof docStatusIcon] || docStatusIcon.warning;
   const DocIcon = docCfg.icon;
+
+  const handleOverride = async () => {
+    if (!doc.id) {
+      toast.error("Document cannot be overridden");
+      return;
+    }
+    setOverriding(true);
+    try {
+      await overrideDocument(doc.id);
+      await queryClient.invalidateQueries({ queryKey: ["documents"] });
+      await queryClient.invalidateQueries({ queryKey: ["candidates"] });
+      toast.success("Document approved");
+      setOverrideOpen(false);
+    } catch {
+      toast.error("Failed to approve document");
+    } finally {
+      setOverriding(false);
+    }
+  };
 
   const handleViewDocument = async (filePath: string) => {
     setViewingDoc(true);
