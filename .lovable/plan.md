@@ -1,75 +1,32 @@
-## Goal
+# Goal
 
-Three fixes:
+Improve the AI's robustness when reading handwritten documents so it correctly handles the wide variety of real-world handwriting: cursive vs print, mixed scripts, slanted/messy writing, varied signature styles (full signatures, scribbles, stylized marks), and initials in different forms (block letters, monograms, joined cursive).
 
-1. Remove the percentage display from the candidate modal header (the screenshot shows `86%` + `Fail` badge top-right of the modal — both go away, replaced with the same passed/failed counts the card uses).
-2. Make Override update the UI immediately (currently the query invalidation key doesn't match, so the user has to refresh).
-3. Make the count shown on each candidate card depend on the active filter tab:
-   - **All tab**: keep current behavior (`X / Y passed` plus `Z failed` line) — unchanged.
-   - **Validated tab**: show only the passed-document count for that candidate (e.g. `3 passed`, green).
-   - **Failed tab**: show only the failed-document count for that candidate (e.g. `2 failed`, red).
+This is a prompt-only change — no schema, DB, or UI changes needed.
 
-## Technical changes
+# Technical changes
 
-### `src/components/CandidateCard.tsx`
-- Add a new optional prop `filter?: "all" | "pass" | "fail"` (default `"all"`).
-- Keep the existing `passedCount` / `failedCount` / `totalCount` calculation.
-- Render the right-hand stat block conditionally:
-  - `filter === "all"` → current two-line block (`{passed} / {total} passed` + `{failed} failed`).
-  - `filter === "pass"` → single line `<span class="text-success font-bold text-2xl">{passedCount}</span> passed`.
-  - `filter === "fail"` → single line `<span class="text-destructive font-bold text-2xl">{failedCount}</span> failed`.
-- Empty case (`totalCount === 0`) keeps the `0 documents` fallback.
+### `supabase/functions/process-document/index.ts`
 
-### `src/pages/SessionDetail.tsx`
-- Pass the current `filter` to each `<CandidateCard … filter={filter} />`.
-- No other logic changes. (Note: in `pass`/`fail` tabs, `candidate.documents` is already filtered by `getDocumentsForFilter`, so the per-card counts will naturally reflect the visible subset, which is exactly what we want.)
+**1. `HANDWRITING_SYSTEM_PROMPT` (around line 756)** — extend the rules so the HTR pass explicitly accounts for handwriting variability:
 
-### `src/components/CandidateModal.tsx`
-- In the `DialogHeader` right column (lines ~551–554), remove the `{candidate.score}%` and the `{cfg.label}` status badge.
-- Replace with the same compact counts block used on the card:
-  ```
-  X / Y passed     (green numerator)
-  Z failed         (red, only if Z > 0)
-  ```
-  Computed from `candidate.documents` using the same `overridden`-aware rule.
-- Drop the now-unused `cfg` lookup in this component (or keep it if used elsewhere — currently only used here).
+- Add an explicit instruction that handwriting may appear in many styles: block print (UPPERCASE), lowercase print, cursive/joined, mixed cursive+print, slanted/italic, neat or messy, written with pen, pencil, or marker in any color.
+- Instruct the model to normalize each transcription to the intended characters regardless of style — don't lower confidence purely because the script style is unusual; only lower it when characters are genuinely ambiguous.
+- For **signatures**: accept ALL signature forms as valid pen marks — full legible names, partial names, stylized scribbles, looped flourishes, single-stroke marks, monograms, or marks that don't resemble the printed name. A signature does NOT need to be readable to count as present; mark `signature_present = true` whenever any deliberate handwritten ink mark sits in the signature line/box. Only mark absent when the signature area is clearly empty.
+- For **initials**: accept initials written as separated block letters (e.g. "J.S."), joined cursive monograms, overlapping letters, single-letter shorthand, or stylized marks. Treat any deliberate handwritten mark in an initials box/margin as initials present, even if the exact letters are not decipherable.
+- Clarify that `field_confidences` should reflect *character-level* legibility, not stylistic neatness — a clean cursive signature is high confidence even if not transcribable to a name.
 
-### Override live-refresh fix — `src/components/CandidateModal.tsx`
-In `DocumentSection.handleOverride` the invalidation currently calls:
-```ts
-queryClient.invalidateQueries({ queryKey: ["documents"] });
-queryClient.invalidateQueries({ queryKey: ["candidates"] });
-```
-But `SessionDetail` registers the queries as `["documents", id]` and `["candidates", id]`. React Query does prefix-match these correctly, **but** when the user clicks Override the UI doesn't appear to update because:
-- `candidate` passed into the modal is a **memoized snapshot** built in `SessionDetail` (`candidatesWithDocs` → `filtered`). The modal renders `candidate.documents` from props, not from a fresh query.
-- After a successful override, the modal stays open showing stale props until it's reopened.
+**2. Main extraction prompt — `textPrompt` (around line 595)** — add one short sentence reminding the model to consider that handwritten content may appear in many fonts, scripts and styles (cursive, print, mixed, stylized signatures and initials), and to validate signature/initial presence based on the existence of a deliberate pen mark rather than legibility.
 
-Fix:
-1. Keep the query invalidations and broaden them to ensure refetch:
-   ```ts
-   await Promise.all([
-     queryClient.invalidateQueries({ queryKey: ["documents"] }),
-     queryClient.invalidateQueries({ queryKey: ["candidates"] }),
-     queryClient.invalidateQueries({ queryKey: ["session"] }),
-   ]);
-   ```
-2. Make the modal re-render against fresh data by selecting the latest candidate from the cache in `SessionDetail`. The simplest approach: store only `selectedCandidateId` (string) in `SessionDetail` state, then derive `selectedCandidate` from `candidatesWithDocs` on every render:
-   ```ts
-   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
-   const selectedCandidate = useMemo(
-     () => candidatesWithDocs.find(c => c.id === selectedCandidateId) ?? null,
-     [candidatesWithDocs, selectedCandidateId]
-   );
-   ```
-   Update the card click handler (`onClick={() => setSelectedCandidateId(candidate.id)}`) and the modal `onClose` (`setSelectedCandidateId(null)`).
-   This way, as soon as the documents query refetches after override, the modal automatically reflects the new `overridden: true` flag — the document badge flips to "Approved (overridden)", the per-card and per-modal counts update, and tab membership updates without a manual refresh.
+**3. `analyzeHandwriting` user message (lines 782, 786)** — append a brief reminder to the per-call user prompt: "Account for varied handwriting styles, cursive and print scripts, and stylized signatures and initials."
 
-### Out of scope
-- No DB / edge-function changes.
-- No changes to `score` calculation, reports, or CSV/PDF export (they keep using `score` internally).
-- No changes to `SessionCard` or the top stats bar on `SessionDetail`.
+# Out of scope
 
-## Files to change
-- `src/components/CandidateCard.tsx`
-- `src/components/CandidateModal.tsx`
-- `src/pages/SessionDetail.tsx`
+- No changes to `handwritingToolSchema` (the structured fields already capture what we need).
+- No changes to `reconcileHandwriting` logic.
+- No frontend, DB, or migration changes.
+- No model swap — `google/gemini-2.5-pro` already supports diverse handwriting well; this is a prompting refinement.
+
+# Files to change
+
+- `supabase/functions/process-document/index.ts`
