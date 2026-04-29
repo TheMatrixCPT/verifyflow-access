@@ -290,10 +290,37 @@ const SessionDetail = () => {
           </div>
           <div className="vf-card flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-purple/10 flex items-center justify-center">
-              <span className="text-sm font-bold text-purple">{stats.complete}%</span>
+              <FileText className="h-4 w-4 text-purple" />
             </div>
             <div>
-              <p className="text-xs text-muted-foreground">Pass Rate</p>
+              {(() => {
+                // Numerator/denominator + colors depend on the active filter
+                const numerator =
+                  filter === "pass" ? stats.docsPassed :
+                  filter === "fail" ? stats.docsFailed :
+                  stats.docsPassed;
+                const denominator = stats.docsTotal;
+                const numColor =
+                  filter === "fail"
+                    ? "text-error"
+                    : numerator > 0
+                      ? "text-success"
+                      : "text-foreground";
+                const denomColor =
+                  filter === "all"
+                    ? (stats.docsFailed > 0 ? "text-error" : "text-success")
+                    : "text-muted-foreground";
+                return (
+                  <p className="text-[22px] font-bold leading-none">
+                    <span className={numColor}>{numerator}</span>
+                    <span className="text-muted-foreground"> / </span>
+                    <span className={denomColor}>{denominator}</span>
+                  </p>
+                );
+              })()}
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {filter === "pass" ? "Documents validated" : filter === "fail" ? "Documents failed" : "Documents passed"}
+              </p>
             </div>
           </div>
           <div className="vf-card flex items-center gap-3">
