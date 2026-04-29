@@ -592,7 +592,7 @@ async function buildUserContent(fileUrl: string, fileName: string, crossReferenc
     ? `FILENAME HINTS (authoritative for identification — admin-named): The filename suggests ${filenameHintParts.join(", ")}. Use these as your primary signal for candidate_name, extracted_id_number, and document_type. Confirm them against the actual document content; if the document content clearly contradicts the filename, still extract what the document says but flag the mismatch in your summary. Filename wins on conflict for candidate identification.`
     : `FILENAME HINTS: Could not parse a recognised pattern from "${fileName}". Identify the candidate and document type from content alone.`;
 
-  const textPrompt = `Analyze this document and validate it thoroughly. Filename: "${fileName}". ${filenamePrompt} ${crossReferencePrompt} Check all pages before deciding anything is missing. Do not stop at the first pages of a multi-page document. Read pen marks, ticks, handwritten selections, and check boxes carefully because they contain important answers. Many forms are filled in by hand — transcribe handwritten names, IDs, dates and signatures with the same care as printed text. Remember to extract stamp dates, police station names, and certification authority details even when stamps overlap words. For employment equity forms, treat the nationality answer as Yes or No: No means South African, Yes means foreign national. If foreign national is marked yes, extract the acquired date of nationality, residence date, or permit-related date into extracted_info.foreign_national_support_date. For contracts, page 10 employee details is an information page and does not require employee or employer signatures. Some contracts require only the employee signature while others require both employee and employer signatures, so decide from the actual signature blocks and wording on the relevant signature page. For disability and proof-of-address documents, do not require Capaciti formatting if the core identifying information and stamps/signatures are present. If the filename or readable contents clearly indicate MIE verification, a course or training completion certificate, or another listed supporting document type, classify it using that specific document_type instead of "Other". CHOOSE "Other" ONLY AS A LAST RESORT. Before picking "Other", scan the document for: (a) form codes such as EEA1, TCX, IRP5, BA; (b) letterheads (SARS, SAPS, banks, municipalities, training providers); (c) titles like "Affidavit", "Bank Letter", "Proof of Address", "Proof of Residence", "Curriculum Vitae", "Certificate of Completion", "Matric Certificate", "Senior Certificate"; (d) signatory blocks ("Commissioner of Oaths"). A "Proof of Address" or "Proof of Residence" letter (bank, municipality, traffic department, SAPS) MUST be classified as "Bank Letter" — never "Other". If any of these point to one of the 16 Capaciti types, pick that type even when the filename gives no hint. For unfamiliar documents, still extract all readable information and verify candidate name, surname, and ID number where present. Mark non-required missing stamp or certification findings as warning checks prefixed with "Optional -". Respond using the extract_document_info function. Be thorough in your validation checks.`;
+  const textPrompt = `Analyze this document and validate it thoroughly. Filename: "${fileName}". ${filenamePrompt} ${crossReferencePrompt} Check all pages before deciding anything is missing. Do not stop at the first pages of a multi-page document. Read pen marks, ticks, handwritten selections, and check boxes carefully because they contain important answers. Many forms are filled in by hand — transcribe handwritten names, IDs, dates and signatures with the same care as printed text. Handwriting will appear in many styles (block print, lowercase print, cursive, joined or stylized, slanted, neat or messy, in pen/pencil/marker of any colour) — interpret the intended characters regardless of style. Treat signatures and initials as PRESENT whenever any deliberate handwritten ink mark sits in the signature/initials area, even if the mark is a stylized scribble, monogram, single stroke, or otherwise unreadable; only mark them missing when the area is clearly empty. Remember to extract stamp dates, police station names, and certification authority details even when stamps overlap words. For employment equity forms, treat the nationality answer as Yes or No: No means South African, Yes means foreign national. If foreign national is marked yes, extract the acquired date of nationality, residence date, or permit-related date into extracted_info.foreign_national_support_date. For contracts, page 10 employee details is an information page and does not require employee or employer signatures. Some contracts require only the employee signature while others require both employee and employer signatures, so decide from the actual signature blocks and wording on the relevant signature page. For disability and proof-of-address documents, do not require Capaciti formatting if the core identifying information and stamps/signatures are present. If the filename or readable contents clearly indicate MIE verification, a course or training completion certificate, or another listed supporting document type, classify it using that specific document_type instead of "Other". CHOOSE "Other" ONLY AS A LAST RESORT. Before picking "Other", scan the document for: (a) form codes such as EEA1, TCX, IRP5, BA; (b) letterheads (SARS, SAPS, banks, municipalities, training providers); (c) titles like "Affidavit", "Bank Letter", "Proof of Address", "Proof of Residence", "Curriculum Vitae", "Certificate of Completion", "Matric Certificate", "Senior Certificate"; (d) signatory blocks ("Commissioner of Oaths"). A "Proof of Address" or "Proof of Residence" letter (bank, municipality, traffic department, SAPS) MUST be classified as "Bank Letter" — never "Other". If any of these point to one of the 16 Capaciti types, pick that type even when the filename gives no hint. For unfamiliar documents, still extract all readable information and verify candidate name, surname, and ID number where present. Mark non-required missing stamp or certification findings as warning checks prefixed with "Optional -". Respond using the extract_document_info function. Be thorough in your validation checks.`;
   
   try {
     const base64 = await fetchFileAsBase64(fileUrl);
@@ -757,6 +757,11 @@ const HANDWRITING_SYSTEM_PROMPT = `You are a dedicated Handwritten Text Recognit
 
 Your ONLY job: transcribe handwritten content and detect pen marks. You do NOT classify documents, do NOT do compliance validation, do NOT comment on layout. Just read the pen.
 
+Handwriting styles you must handle equally well:
+- Block print in UPPERCASE, lowercase print, cursive/joined script, mixed cursive+print, italic/slanted, neat or messy.
+- Pen, pencil, ballpoint, gel, or marker, in any ink colour (blue, black, red, etc.).
+- Names, ID numbers and dates may be written in any of the above styles. Normalize each transcription to the intended characters regardless of style — do NOT lower confidence purely because the script style is unusual; only lower it when individual characters are genuinely ambiguous.
+
 Transcribe:
 - Handwritten first/given names and surnames into handwritten_name / handwritten_surname.
 - Handwritten 13-digit SA ID numbers into handwritten_id_number (digits only).
@@ -765,8 +770,17 @@ Transcribe:
 - Every signature block with its label and whether a handwritten signature is present.
 - For multi-page Beneficiary Agreements and Employment Contracts, look at every page and report whether candidate initials are present on each page in initials_per_page.
 
+Signature rules:
+- Accept ALL signature forms as valid: full legible names, partial names, stylized scribbles, looped flourishes, single-stroke marks, monograms, or marks that do not resemble the printed name.
+- A signature does NOT need to be readable to count as present. Set signature_present = true whenever any deliberate handwritten ink mark sits on/near the signature line or inside the signature box. Only set false when the signature area is clearly empty.
+
+Initials rules:
+- Accept initials in any form: separated block letters (e.g. "J.S."), joined cursive monograms, overlapping letters, single-letter shorthand, or stylized marks.
+- Treat any deliberate handwritten mark in an initials box/margin as initials present, even when the exact letters cannot be deciphered.
+
 Rules:
-- Confidence must be honest: if the writing is messy, lower the confidence. Do NOT invent text.
+- field_confidences must reflect character-level legibility, not stylistic neatness — a clean cursive signature is high confidence as a present signature even if you cannot transcribe it to a name.
+- Confidence on transcribed text must be honest: if individual characters are messy or ambiguous, lower the confidence. Do NOT invent text.
 - If a handwritten field is attempted but unreadable, leave its value empty and add the label to illegible_fields.
 - Do not echo printed/typed text — only what is HANDWRITTEN or MARKED with a pen.
 - Read every page before deciding a field is missing.
@@ -779,11 +793,11 @@ async function analyzeHandwriting(apiKey: string, fileUrl: string, fileName: str
     const mimeType = getMimeType(fileName);
     const userContent = isPdfFile(fileName)
       ? [
-          { type: "text", text: `Transcribe handwritten content and pen marks on this document (filename: "${fileName}"). Read every page.` },
+          { type: "text", text: `Transcribe handwritten content and pen marks on this document (filename: "${fileName}"). Read every page. Account for varied handwriting styles — block print, cursive, mixed, slanted, neat or messy — and treat stylized signatures and initials as present whenever a deliberate pen mark exists in the relevant area.` },
           { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}` } }
         ]
       : [
-          { type: "text", text: `Transcribe handwritten content and pen marks on this document (filename: "${fileName}").` },
+          { type: "text", text: `Transcribe handwritten content and pen marks on this document (filename: "${fileName}"). Account for varied handwriting styles — block print, cursive, mixed, slanted, neat or messy — and treat stylized signatures and initials as present whenever a deliberate pen mark exists in the relevant area.` },
           { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}`, detail: "high" } }
         ];
 
