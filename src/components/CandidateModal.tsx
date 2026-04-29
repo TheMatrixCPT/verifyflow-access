@@ -252,10 +252,27 @@ const DocumentSection = ({ doc, onReplaceDocument, candidateName }: { doc: Docum
           <span className="text-sm font-semibold text-foreground truncate">{doc.type}</span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          {(() => {
-            const sc = statusConfig[doc.status as keyof typeof statusConfig] || statusConfig.warning;
-            return <span className={sc.badge}>{sc.label}</span>;
-          })()}
+          {isOverridden ? (
+            <span className="vf-badge-success flex items-center gap-1">
+              <ShieldCheck className="h-3 w-3" />
+              Approved (overridden)
+            </span>
+          ) : (
+            (() => {
+              const sc = statusConfig[doc.status as keyof typeof statusConfig] || statusConfig.warning;
+              return <span className={sc.badge}>{sc.label}</span>;
+            })()
+          )}
+          {doc.status === "warning" && !isOverridden && doc.id && (
+            <button
+              className="text-xs font-medium text-success hover:text-success/80 underline flex items-center gap-0.5"
+              onClick={(e) => { e.stopPropagation(); setOverrideOpen(true); }}
+              title="Approve this document despite warnings"
+            >
+              <ShieldCheck className="h-3 w-3" />
+              Override
+            </button>
+          )}
           {doc.status === "fail" && onReplaceDocument && (
             <button
               className="text-xs font-medium text-destructive hover:text-destructive/80 underline flex items-center gap-0.5"
