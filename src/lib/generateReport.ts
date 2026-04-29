@@ -296,61 +296,30 @@ export function generateReportCsv(data: ReportData) {
   rows.push(
     buildCsvRow([
       "Candidate Name",
-      "Candidate Status",
-      "Candidate Score",
-      "Candidate Summary",
-      "Candidate Issues",
       "Document File Name",
       "Document Type",
       "Document Status",
       "Confidence",
       "Document Issues",
-      "Document Checks",
     ]),
   );
 
   data.candidates.forEach((candidate) => {
-    const candidateSummary = normalizeBirthDateText(candidate.summary || "");
-    const candidateIssues = (candidate.issues || []).join("; ");
-
     if (candidate.documents.length === 0) {
-      rows.push(
-        buildCsvRow([
-          candidate.name,
-          statusLabel(candidate.status),
-          `${candidate.score}%`,
-          candidateSummary,
-          candidateIssues,
-          "",
-          "",
-          "",
-          "",
-          "",
-          "",
-        ]),
-      );
+      rows.push(buildCsvRow([candidate.name, "", "", "", "", ""]));
       return;
     }
 
     candidate.documents.forEach((document) => {
       const documentIssues = (document.issues || []).join("; ");
-      const checks = (document.checks || [])
-        .map((check) => `${check.name}: ${statusLabel(check.status)} - ${normalizeBirthDateText(check.detail)}`)
-        .join("; ");
-
       rows.push(
         buildCsvRow([
           candidate.name,
-          statusLabel(candidate.status),
-          `${candidate.score}%`,
-          candidateSummary,
-          candidateIssues,
           document.fileName,
           document.type,
           statusLabel(document.status),
           `${document.confidence}%`,
           documentIssues,
-          checks,
         ]),
       );
     });
