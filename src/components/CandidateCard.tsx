@@ -99,8 +99,22 @@ const CandidateCard = ({ candidate, onClick, onDelete }: CandidateCardProps) => 
             </p>
           </div>
           <div className="text-right pr-6">
-            <div className="text-[32px] font-bold text-foreground leading-none">{candidate.score}%</div>
-            <span className={cfg.badge}>{cfg.label}</span>
+            {totalCount === 0 ? (
+              <div className="text-sm text-muted-foreground">0 documents</div>
+            ) : (
+              <>
+                <div className="text-base leading-tight">
+                  <span className="text-success font-bold text-2xl">{passedCount}</span>
+                  <span className="text-muted-foreground"> / {totalCount} passed</span>
+                </div>
+                {failedCount > 0 && (
+                  <div className="text-sm mt-1">
+                    <span className="text-destructive font-semibold">{failedCount}</span>
+                    <span className="text-muted-foreground"> failed</span>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </div>
 
