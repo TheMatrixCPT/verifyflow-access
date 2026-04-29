@@ -58,7 +58,7 @@ const SessionDetail = () => {
     documentType: string;
     fileName: string;
   } | null>(null);
-  const [selectedCandidate, setSelectedCandidate] = useState<CandidateData | null>(null);
+  const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
   const { data: session } = useQuery({
@@ -221,7 +221,7 @@ const SessionDetail = () => {
       return;
     }
 
-    setSelectedCandidate(null);
+    setSelectedCandidateId(null);
     setReplacementTarget({
       candidateId: candidate.id,
       candidateName: candidate.name,
@@ -231,6 +231,11 @@ const SessionDetail = () => {
     });
     setUploadOpen(true);
   };
+
+  const selectedCandidate = useMemo(
+    () => filtered.find((c) => c.id === selectedCandidateId) ?? candidatesWithDocs.find((c) => c.id === selectedCandidateId) ?? null,
+    [filtered, candidatesWithDocs, selectedCandidateId]
+  );
 
   return (
     <div className="min-h-screen bg-background">
@@ -354,7 +359,7 @@ const SessionDetail = () => {
         {filtered.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 items-start">
             {filtered.map((candidate) => (
-              <CandidateCard key={candidate.id} candidate={candidate} onClick={() => setSelectedCandidate(candidate)} onDelete={handleDeleteCandidate} />
+              <CandidateCard key={candidate.id} candidate={candidate} filter={filter} onClick={() => setSelectedCandidateId(candidate.id)} onDelete={handleDeleteCandidate} />
             ))}
           </div>
         ) : candidates.length === 0 ? (
@@ -382,7 +387,7 @@ const SessionDetail = () => {
       <CandidateModal
         candidate={selectedCandidate}
         open={!!selectedCandidate}
-        onClose={() => setSelectedCandidate(null)}
+        onClose={() => setSelectedCandidateId(null)}
         onReplaceDocument={handleReplaceDocument}
       />
     </div>
