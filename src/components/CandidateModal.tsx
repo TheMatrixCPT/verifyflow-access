@@ -91,8 +91,11 @@ const DocumentSection = ({ doc, onReplaceDocument, candidateName }: { doc: Docum
     setOverriding(true);
     try {
       await overrideDocument(doc.id);
-      await queryClient.invalidateQueries({ queryKey: ["documents"] });
-      await queryClient.invalidateQueries({ queryKey: ["candidates"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["documents"] }),
+        queryClient.invalidateQueries({ queryKey: ["candidates"] }),
+        queryClient.invalidateQueries({ queryKey: ["session"] }),
+      ]);
       toast.success("Document approved");
       setOverrideOpen(false);
     } catch {
@@ -533,8 +536,10 @@ interface CandidateModalProps {
 const CandidateModal = ({ candidate, open, onClose, onReplaceDocument }: CandidateModalProps) => {
   if (!candidate) return null;
 
-  const cfg = statusConfig[candidate.status as keyof typeof statusConfig] || statusConfig.warning;
   const secondaryLabel = candidate.primaryDocumentLabel || "Document Type: Unknown";
+  const passedCount = candidate.documents.filter((d) => d.overridden || d.status === "pass").length;
+  const failedCount = candidate.documents.filter((d) => !d.overridden && (d.status === "fail" || d.status === "warning")).length;
+  const totalCount = candidate.documents.length;
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
@@ -549,8 +554,22 @@ const CandidateModal = ({ candidate, open, onClose, onReplaceDocument }: Candida
               </p>
             </div>
             <div className="text-right">
-              <div className="text-3xl font-bold text-foreground leading-none">{candidate.score}%</div>
-              <span className={cfg.badge}>{cfg.label}</span>
+              {totalCount === 0 ? (
+                <div className="text-sm text-muted-foreground">0 documents</div>
+              ) : (
+                <>
+                  <div className="text-base leading-tight">
+                    <span className="text-success font-bold text-2xl">{passedCount}</span>
+                    <span className="text-muted-foreground"> / {totalCount} passed</span>
+                  </div>
+                  {failedCount > 0 && (
+                    <div className="text-sm mt-1">
+                      <span className="text-destructive font-semibold">{failedCount}</span>
+                      <span className="text-muted-foreground"> failed</span>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           </div>
         </DialogHeader>

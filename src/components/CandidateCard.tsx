@@ -61,9 +61,10 @@ interface CandidateCardProps {
   candidate: CandidateData;
   onClick: () => void;
   onDelete?: (id: string) => void;
+  filter?: "all" | "pass" | "fail";
 }
 
-const CandidateCard = ({ candidate, onClick, onDelete }: CandidateCardProps) => {
+const CandidateCard = ({ candidate, onClick, onDelete, filter = "all" }: CandidateCardProps) => {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const cfg = statusConfig[candidate.status];
   const secondaryLabel = candidate.primaryDocumentLabel || "Document Type: Unknown";
@@ -101,6 +102,16 @@ const CandidateCard = ({ candidate, onClick, onDelete }: CandidateCardProps) => 
           <div className="text-right pr-6">
             {totalCount === 0 ? (
               <div className="text-sm text-muted-foreground">0 documents</div>
+            ) : filter === "pass" ? (
+              <div className="text-base leading-tight">
+                <span className="text-success font-bold text-2xl">{passedCount}</span>
+                <span className="text-muted-foreground"> passed</span>
+              </div>
+            ) : filter === "fail" ? (
+              <div className="text-base leading-tight">
+                <span className="text-destructive font-bold text-2xl">{failedCount}</span>
+                <span className="text-muted-foreground"> failed</span>
+              </div>
             ) : (
               <>
                 <div className="text-base leading-tight">
