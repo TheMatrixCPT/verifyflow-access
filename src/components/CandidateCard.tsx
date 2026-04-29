@@ -36,6 +36,7 @@ export interface DocumentData {
   certificationAuthority?: string;
   extractedInfo?: Record<string, any>;
   handwriting?: Record<string, any> | null;
+  overridden?: boolean;
 }
 
 export interface CandidateData {

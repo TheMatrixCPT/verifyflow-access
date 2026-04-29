@@ -724,6 +724,18 @@ export async function deleteSession(id: string) {
   if (error) throw error;
 }
 
+export async function overrideDocument(documentId: string) {
+  const { error } = await supabase
+    .from("documents")
+    .update({
+      overridden: true,
+      overridden_at: new Date().toISOString(),
+      validation_status: "pass",
+    })
+    .eq("id", documentId);
+  if (error) throw error;
+}
+
 export async function deleteCandidate(candidateId: string) {
   // Delete associated documents from storage and DB
   const { data: docs } = await supabase.from("documents").select("file_path").eq("candidate_id", candidateId);
