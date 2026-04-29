@@ -1,11 +1,23 @@
 import { useState } from "react";
 import { CheckCircle, AlertTriangle, XCircle, FileText, Eye, ExternalLink, Clock, Loader2, ChevronDown, User, Hash, Calendar, MapPin, Phone, Mail, Briefcase, GraduationCap, Building, ShieldCheck, Upload, Download } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { formatDateToDayMonthYear, normalizeBirthDateText } from "@/lib/dateFormatting";
+import { overrideDocument } from "@/lib/api";
+import { useQueryClient } from "@tanstack/react-query";
 import type { CandidateData, DocumentData } from "@/components/CandidateCard";
 
 const statusConfig = {
@@ -63,8 +75,32 @@ const InfoRow = ({ icon: Icon, label, value }: { icon: React.ElementType; label:
 const DocumentSection = ({ doc, onReplaceDocument, candidateName }: { doc: DocumentData; onReplaceDocument?: (doc: DocumentData) => void; candidateName?: string }) => {
   const [expanded, setExpanded] = useState(false);
   const [viewingDoc, setViewingDoc] = useState(false);
-  const docCfg = docStatusIcon[doc.status as keyof typeof docStatusIcon] || docStatusIcon.warning;
+  const [overrideOpen, setOverrideOpen] = useState(false);
+  const [overriding, setOverriding] = useState(false);
+  const queryClient = useQueryClient();
+  const isOverridden = !!doc.overridden;
+  const effectiveDocStatus = isOverridden ? "pass" : doc.status;
+  const docCfg = docStatusIcon[effectiveDocStatus as keyof typeof docStatusIcon] || docStatusIcon.warning;
   const DocIcon = docCfg.icon;
+
+  const handleOverride = async () => {
+    if (!doc.id) {
+      toast.error("Document cannot be overridden");
+      return;
+    }
+    setOverriding(true);
+    try {
+      await overrideDocument(doc.id);
+      await queryClient.invalidateQueries({ queryKey: ["documents"] });
+      await queryClient.invalidateQueries({ queryKey: ["candidates"] });
+      toast.success("Document approved");
+      setOverrideOpen(false);
+    } catch {
+      toast.error("Failed to approve document");
+    } finally {
+      setOverriding(false);
+    }
+  };
 
   const handleViewDocument = async (filePath: string) => {
     setViewingDoc(true);
@@ -206,6 +242,7 @@ const DocumentSection = ({ doc, onReplaceDocument, candidateName }: { doc: Docum
   const extractedInfo = doc.extractedInfo as ExtractedInfo | undefined;
 
   return (
+    <>
     <div className={`rounded-lg border border-border ${docCfg.bg}`}>
       <div
         className="flex items-center justify-between p-3 cursor-pointer"
@@ -216,10 +253,27 @@ const DocumentSection = ({ doc, onReplaceDocument, candidateName }: { doc: Docum
           <span className="text-sm font-semibold text-foreground truncate">{doc.type}</span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          {(() => {
-            const sc = statusConfig[doc.status as keyof typeof statusConfig] || statusConfig.warning;
-            return <span className={sc.badge}>{sc.label}</span>;
-          })()}
+          {isOverridden ? (
+            <span className="vf-badge-success flex items-center gap-1">
+              <ShieldCheck className="h-3 w-3" />
+              Approved (overridden)
+            </span>
+          ) : (
+            (() => {
+              const sc = statusConfig[doc.status as keyof typeof statusConfig] || statusConfig.warning;
+              return <span className={sc.badge}>{sc.label}</span>;
+            })()
+          )}
+          {doc.status === "warning" && !isOverridden && doc.id && (
+            <button
+              className="text-xs font-medium text-success hover:text-success/80 underline flex items-center gap-0.5"
+              onClick={(e) => { e.stopPropagation(); setOverrideOpen(true); }}
+              title="Approve this document despite warnings"
+            >
+              <ShieldCheck className="h-3 w-3" />
+              Override
+            </button>
+          )}
           {doc.status === "fail" && onReplaceDocument && (
             <button
               className="text-xs font-medium text-destructive hover:text-destructive/80 underline flex items-center gap-0.5"
@@ -444,6 +498,28 @@ const DocumentSection = ({ doc, onReplaceDocument, candidateName }: { doc: Docum
         </div>
       )}
     </div>
+
+    <AlertDialog open={overrideOpen} onOpenChange={setOverrideOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Approve this document?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Approve <span className="font-semibold text-foreground">{doc.type}</span> despite the warnings? It will be moved to the Validated tab and counted as passed.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={overriding}>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            className="bg-success text-success-foreground hover:bg-success/90"
+            onClick={(e) => { e.preventDefault(); handleOverride(); }}
+            disabled={overriding}
+          >
+            {overriding ? "Approving…" : "Approve"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 };
 

@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
-import { Upload, Download, ChevronDown, Search, Users, CheckCircle, AlertTriangle, ArrowLeft } from "lucide-react";
+import { Upload, Download, ChevronDown, Search, Users, CheckCircle, AlertTriangle, ArrowLeft, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Header from "@/components/Header";
 import CandidateCard from "@/components/CandidateCard";
@@ -18,9 +18,18 @@ import type { DocumentData, CandidateData } from "@/components/CandidateCard";
 
 type FilterType = "all" | "pass" | "fail";
 
+function effectiveStatus(doc: DocumentData): "pass" | "warning" | "fail" {
+  return doc.overridden ? "pass" : doc.status;
+}
+
 function getDocumentsForFilter(documents: DocumentData[], filter: FilterType): DocumentData[] {
   if (filter === "all") return documents;
-  return documents.filter((document) => document.status === filter);
+  if (filter === "pass") return documents.filter((d) => effectiveStatus(d) === "pass");
+  // "fail" tab includes both fail and warning (non-overridden)
+  return documents.filter((d) => {
+    const s = effectiveStatus(d);
+    return s === "fail" || s === "warning";
+  });
 }
 
 function buildDocumentTypeLabel(documents: DocumentData[]): string {
@@ -91,6 +100,7 @@ const SessionDetail = () => {
       certificationAuthority: (d.validation_details as any)?.certification_authority || undefined,
       extractedInfo: (d.validation_details as any)?.extracted_info || undefined,
       handwriting: (d.validation_details as any)?.handwriting || null,
+      overridden: (d as any).overridden ?? false,
     }));
 
     // Calculate score dynamically from checks: passed / total * 100
@@ -117,8 +127,8 @@ const SessionDetail = () => {
 
       const visibleChecks = visibleDocuments.flatMap((document) => document.checks || []);
       const visibleIssues = visibleDocuments.flatMap((document) => document.issues || []).filter(Boolean);
-      const hasFailure = visibleDocuments.some((document) => document.status === "fail");
-      const hasWarning = visibleDocuments.some((document) => document.status === "warning");
+      const hasFailure = visibleDocuments.some((document) => effectiveStatus(document) === "fail");
+      const hasWarning = visibleDocuments.some((document) => effectiveStatus(document) === "warning");
       const visibleStatus = hasFailure ? "fail" : hasWarning ? "warning" : "pass";
 
       const result: CandidateData = {
@@ -137,12 +147,24 @@ const SessionDetail = () => {
       return candidate.name.toLowerCase().includes(query) || candidate.idNumber.includes(searchQuery);
     }), [candidatesWithDocs, filter, searchQuery]);
 
+  // Document-level counts (used by the "Documents X/Y" stat card)
+  const allDocs = candidatesWithDocs.flatMap((c) => c.documents);
+  const passedDocs = allDocs.filter((d) => effectiveStatus(d) === "pass").length;
+  const failedDocs = allDocs.filter((d) => {
+    const s = effectiveStatus(d);
+    return s === "fail" || s === "warning";
+  }).length;
+  const totalDocs = allDocs.length;
+
   const sessionChecks = documents.flatMap((d) => ((d.validation_details as any)?.checks || []));
   const stats = {
     total: candidates.length,
     validated: candidates.filter((c) => c.status !== "fail").length,
     complete: calculateValidationScore(sessionChecks),
     issues: candidates.filter((c) => c.status !== "pass").length,
+    docsPassed: passedDocs,
+    docsFailed: failedDocs,
+    docsTotal: totalDocs,
   };
 
   const handleDownloadReport = () => {
@@ -268,10 +290,37 @@ const SessionDetail = () => {
           </div>
           <div className="vf-card flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-purple/10 flex items-center justify-center">
-              <span className="text-sm font-bold text-purple">{stats.complete}%</span>
+              <FileText className="h-4 w-4 text-purple" />
             </div>
             <div>
-              <p className="text-xs text-muted-foreground">Pass Rate</p>
+              {(() => {
+                // Numerator/denominator + colors depend on the active filter
+                const numerator =
+                  filter === "pass" ? stats.docsPassed :
+                  filter === "fail" ? stats.docsFailed :
+                  stats.docsPassed;
+                const denominator = stats.docsTotal;
+                const numColor =
+                  filter === "fail"
+                    ? "text-error"
+                    : numerator > 0
+                      ? "text-success"
+                      : "text-foreground";
+                const denomColor =
+                  filter === "all"
+                    ? (stats.docsFailed > 0 ? "text-error" : "text-success")
+                    : "text-muted-foreground";
+                return (
+                  <p className="text-[22px] font-bold leading-none">
+                    <span className={numColor}>{numerator}</span>
+                    <span className="text-muted-foreground"> / </span>
+                    <span className={denomColor}>{denominator}</span>
+                  </p>
+                );
+              })()}
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {filter === "pass" ? "Documents validated" : filter === "fail" ? "Documents failed" : "Documents passed"}
+              </p>
             </div>
           </div>
           <div className="vf-card flex items-center gap-3">

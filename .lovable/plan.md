@@ -1,79 +1,88 @@
-# Stop documents from being misclassified as "Other"
+## Goal
 
-The screenshot shows `AmkeleYamani_9912125698081_Proof of Address.pdf` ending up as **Other**. The edge function logs confirm the root cause:
+Restructure the SessionDetail page filtering, stats, and document actions so reviewers think in **documents passed vs failed** (not percentages), warnings are treated as failures requiring action, and individual warning documents can be manually overridden into the validated bucket.
 
-```
-Filename hints for "AmkeleYamani_9912125698081_Proof of Address.pdf":
-  {"docTypeHint":null, ...}
-```
+---
 
-So no build/runtime error — the edge function ran cleanly. The bug is logic-only inside `supabase/functions/process-document/index.ts`.
+## Scope of changes
 
-## Root cause
+### 1. Treat "warning" as "fail" in the Filter tabs
 
-1. **Filename suffix dictionary is too narrow.** Tokens after the ID get joined and normalized: `"Proof of Address"` → `"proofofaddress"`. That key isn't in `SUFFIX_TO_DOCTYPE`, and `matchPartialSuffix` has no entry containing `"proof"` or `"address"`, so `docTypeHint` becomes `null`. The same gap will hit `"Bank Confirmation"`, `"Police Clearance"`, `"Income Tax Certificate"` (only matches by accident on `"tax"`), `"ID Copy"`, etc.
-2. **`matchPartialSuffix` is order-dependent**, not longest-match. `"taxcertificate"` matches `"tax"` first and short-circuits — fragile.
-3. **No content-based fallback when AI returns "Other"** and the filename gives no hint. The "Other" verdict stands even when the document body clearly says "Proof of Residence" or has a SAPS letterhead.
+In `src/pages/SessionDetail.tsx`, the `getDocumentsForFilter` helper currently filters strictly by `status === filter`. Update it so:
 
-## What changes (only `supabase/functions/process-document/index.ts`)
+- **All** tab → shows everything (unchanged).
+- **Validated** tab → shows only documents with status `pass` (or `pass` after override — see #3).
+- **Failed** tab → shows documents with status `fail` **or** `warning`.
 
-### 1. Expand `SUFFIX_TO_DOCTYPE` with real-world phrases
-Add aliases observed in the logs and common admin variants. New entries:
-- `proofofaddress`, `proofofresidence`, `addressproof`, `residenceproof`, `utilitybill`, `municipalbill` → **Bank Letter** *(Capaciti's existing "proof of residence/address" slot — confirmed by question 1)*
-- `incometax`, `incometaxcertificate`, `sarsletter`, `taxnumberletter`, `irp5certificate` → **Tax Certificate**
-- `mieconsent`, `mieverification`, `mieclearance`, `backgroundcheck` → **MIE Verification**
-- `signedofferletter`, `offerofemployment`, `employmentoffer` → **Offer Letter**
-- `bankstatement`, `bankconfirmation`, `bankaccountconfirmation` → **Bank Letter**
-- `idcopy`, `idphoto`, `saidcopy`, `greenid`, `smartid`, `iddocument` → **Certified ID**
-- `policeclearance`, `saps`, `affidavitofunemployment` → **Unemployment Affidavit**
-- `matriccertificate`, `seniorcertificate`, `nsc`, `ieb` → **Qualification Matric**
-- `disabilitycertificate`, `disabilityconfirmation` → **PWDS Confirmation of Disability**
-- `socialmediaconsentform`, `mediaconsent`, `photographyconsent` → **Social Media Consent**
-- `cvresume`, `curriculumvitae` → **CV**
-- `capaciticonsent`, `capacitiagreement` → **Capaciti Declaration**
-- `fixedtermcontract`, `employmentftc` → **Employment Contract FTC**
-- `completioncertificate`, `trainingcompletion` → **Certificate of Completion**
-- `eea1employmentequity`, `employmentequityform` → **EEA1 Form**
+The candidate-level `visibleStatus` derivation already collapses warnings into a non-pass bucket, so candidates surfaced under Failed will correctly include warning-only candidates.
 
-### 2. Replace `matchPartialSuffix` with longest-key-wins
-Iterate all keys, pick the **longest** key contained in the suffix. Guarantees `"taxcertificate"` beats `"tax"`, `"capacitideclaration"` beats `"declaration"`, `"proofofaddress"` beats `"address"` should both ever exist.
+### 2. Replace the "Pass Rate %" stat with a document count visualization
 
-### 3. Add Stage A2 — content-based reclassification
-After Stage A, if **all** of these hold:
-- `extracted.document_type === "Other"`
-- `filenameHints.docTypeHint` is `null`
+Today the third stat card shows `stats.complete%` (pass rate from checks). Replace that card so it shows **document counts** that adapt to the active filter, mirroring the user's spec.
 
-…run a focused second OpenRouter call using `google/gemini-2.5-pro` with a tight prompt:
+New stat card: **Documents** — shows a fraction `X / Y` where `Y` is the total documents in view and `X` is the count relevant to the active tab:
 
-> "You previously classified this document as Other. Re-examine ONLY the visual headings, footers, form codes (EEA1, TCX, IRP5, BA), letterheads (SARS, SAPS, banks, training providers), and title text (Affidavit, Bank Letter, Proof of Address, Curriculum Vitae, Certificate of Completion). Pick the single best match from the 16 Capaciti types. Return Other ONLY if nothing recognisable exists. Provide `classification_evidence` (the exact text relied on) and `confidence` 0-100."
+| Active filter | Display | Color of numerator | Color of denominator |
+|---|---|---|---|
+| All | `passed / total` (e.g. `10 / 20`) | green if ≥1 pass else neutral | red if any fail/warning else green |
+| Validated | `validated / total` (e.g. `12 / 20`) | green | neutral |
+| Failed | `failed / total` (e.g. `8 / 20`) | red | neutral |
 
-Use a dedicated tool schema `reclassify_document` with `document_type` (same enum), `confidence`, `classification_evidence`. Apply the result when `confidence >= 70` AND not "Other":
-- Override `extracted.document_type`
-- Append check: `{ name: "Document type from content", status: "pass", detail: "Re-classified as <type> based on: <evidence>" }`
+Counts are computed from the **document** array (not candidates), using:
+- `passedDocs = documents.filter(d => d.status === "pass" || d.overridden === true)`
+- `failedDocs = documents.filter(d => (d.status === "fail" || d.status === "warning") && !d.overridden)`
+- `totalDocs = documents.length`
 
-If reclassify still says "Other" with high confidence, append a `warning` check `"No recognisable Capaciti document headings or form codes found"` so admins can see the AI looked.
+The other three stat cards (Candidates, Validated candidates, Issues) remain.
 
-### 4. Tighten the Stage A system prompt
-Add one paragraph in `buildSystemPrompt`:
+### 3. Override action on warning documents
 
-> "Choose `Other` ONLY as a last resort. Before picking `Other`, scan for: (a) form codes (EEA1, TCX, IRP5, BA); (b) letterheads (SARS, SAPS, banks); (c) titles ("Affidavit", "Bank Letter", "Proof of Address/Residence", "Certificate of Completion", "Curriculum Vitae"); (d) signatory blocks ("Commissioner of Oaths"). If any point to one of the 16 Capaciti types, pick that type even when the filename gives no hint."
+Allow the reviewer to manually approve a `warning` document so it counts as validated.
 
-### Resulting hierarchy
-```
-Filename suffix (Stage A1)  ▶  Stage A AI  ▶  Stage A2 reclassify (if Other & no hint)  ▶  Stage B handwriting
-```
-Filename still wins for **name & ID**. Doc type now has a content-based safety net before falling back to "Other".
+**Backend (migration):**
+- Add nullable column `documents.overridden boolean default false`.
+- Add nullable column `documents.overridden_at timestamptz`.
+- No RLS changes needed (existing "Anyone can update" policy already allows updates; this app is auth-free per project memory).
+
+**API (`src/lib/api.ts`):**
+- Add `overrideDocument(documentId: string)` which updates `overridden=true`, `overridden_at=now()`, and sets `validation_status='pass'` so existing aggregations and the Validated filter pick it up automatically.
+
+**UI (`src/components/CandidateModal.tsx` → `DocumentSection`):**
+- When `doc.status === "warning"` and not yet overridden, render a new **Override** action button next to "View" / "Download". Use the `ShieldCheck` icon (already imported) with label "Override" and a tooltip "Approve this document".
+- Clicking it opens a themed `AlertDialog` (per memory rule: never browser alerts) confirming "Approve this document despite warnings? It will be moved to Validated."
+- On confirm, call `overrideDocument`, invalidate the `documents` query, and toast "Document approved".
+- After override, show a small green "Approved (overridden)" pill instead of the warning badge.
+
+**Type updates:**
+- Extend `DocumentData` in `CandidateCard.tsx` with `overridden?: boolean`.
+- Map it through in `SessionDetail.tsx` candidate building (`overridden: d.overridden ?? false`).
+
+### 4. Status rollups
+
+Update `candidatesWithDocs` and `filtered` in `SessionDetail.tsx` so a document with `overridden === true` is treated as `pass` when computing:
+- candidate `status`
+- `visibleStatus`
+- the new Documents stat counts
+
+Centralize this with a small helper `effectiveStatus(doc)` returning `"pass"` if overridden, else `doc.status`.
+
+---
+
+## Technical notes
+
+- `SessionCard.tsx` currently maps statuses (`complete | in-progress | has-issues`); no change required — session-level status is unaffected.
+- `validationScore.ts` (per-check scoring) is unchanged; we are only changing how stats are *displayed*, not how individual document scores are computed.
+- The CSV/PDF report generators read from `candidatesWithDocs` and remain functional; overridden docs naturally appear as `pass`.
+
+## Files to change
+
+- `src/pages/SessionDetail.tsx` — filter logic, stats card, status helper, query mapping
+- `src/components/CandidateCard.tsx` — add `overridden` field to `DocumentData`
+- `src/components/CandidateModal.tsx` — Override button + confirm dialog in `DocumentSection`
+- `src/lib/api.ts` — add `overrideDocument`
+- New migration — add `overridden`, `overridden_at` columns to `documents`
 
 ## Out of scope
-- Assessment Tools system (untouched)
-- DB schema (no migration; results stay in existing `validation_details` JSON)
-- UI changes (the new check renders automatically in the existing checks list)
 
-## Files modified
-- `supabase/functions/process-document/index.ts`
-- `mem://features/validation-rules` — note expanded mapping & Stage A2 rule
-- `mem://tech/ai-stack` — note Stage A2 uses `google/gemini-2.5-pro`
-
-## One clarifying question
-
-Capaciti's 16-type list does not contain a literal "Proof of Address" type. I'll ask which existing type these proof-of-residence documents should map to so the alias table is correct.
+- No changes to the AI processing pipeline, scoring formula, or report templates.
+- No undo-override flow (can be added later if needed).
