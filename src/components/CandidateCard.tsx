@@ -61,9 +61,10 @@ interface CandidateCardProps {
   candidate: CandidateData;
   onClick: () => void;
   onDelete?: (id: string) => void;
+  filter?: "all" | "pass" | "fail";
 }
 
-const CandidateCard = ({ candidate, onClick, onDelete }: CandidateCardProps) => {
+const CandidateCard = ({ candidate, onClick, onDelete, filter = "all" }: CandidateCardProps) => {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const cfg = statusConfig[candidate.status];
   const secondaryLabel = candidate.primaryDocumentLabel || "Document Type: Unknown";
