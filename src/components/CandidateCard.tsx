@@ -68,6 +68,14 @@ const CandidateCard = ({ candidate, onClick, onDelete }: CandidateCardProps) => 
   const cfg = statusConfig[candidate.status];
   const secondaryLabel = candidate.primaryDocumentLabel || "Document Type: Unknown";
 
+  const passedCount = candidate.documents.filter(
+    (d) => d.overridden || d.status === "pass"
+  ).length;
+  const failedCount = candidate.documents.filter(
+    (d) => !d.overridden && (d.status === "fail" || d.status === "warning")
+  ).length;
+  const totalCount = candidate.documents.length;
+
   return (
     <>
       <div
