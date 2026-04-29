@@ -100,6 +100,7 @@ const SessionDetail = () => {
       certificationAuthority: (d.validation_details as any)?.certification_authority || undefined,
       extractedInfo: (d.validation_details as any)?.extracted_info || undefined,
       handwriting: (d.validation_details as any)?.handwriting || null,
+      overridden: (d as any).overridden ?? false,
     }));
 
     // Calculate score dynamically from checks: passed / total * 100
