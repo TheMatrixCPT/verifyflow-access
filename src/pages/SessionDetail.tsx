@@ -127,8 +127,8 @@ const SessionDetail = () => {
 
       const visibleChecks = visibleDocuments.flatMap((document) => document.checks || []);
       const visibleIssues = visibleDocuments.flatMap((document) => document.issues || []).filter(Boolean);
-      const hasFailure = visibleDocuments.some((document) => document.status === "fail");
-      const hasWarning = visibleDocuments.some((document) => document.status === "warning");
+      const hasFailure = visibleDocuments.some((document) => effectiveStatus(document) === "fail");
+      const hasWarning = visibleDocuments.some((document) => effectiveStatus(document) === "warning");
       const visibleStatus = hasFailure ? "fail" : hasWarning ? "warning" : "pass";
 
       const result: CandidateData = {
@@ -147,12 +147,24 @@ const SessionDetail = () => {
       return candidate.name.toLowerCase().includes(query) || candidate.idNumber.includes(searchQuery);
     }), [candidatesWithDocs, filter, searchQuery]);
 
+  // Document-level counts (used by the "Documents X/Y" stat card)
+  const allDocs = candidatesWithDocs.flatMap((c) => c.documents);
+  const passedDocs = allDocs.filter((d) => effectiveStatus(d) === "pass").length;
+  const failedDocs = allDocs.filter((d) => {
+    const s = effectiveStatus(d);
+    return s === "fail" || s === "warning";
+  }).length;
+  const totalDocs = allDocs.length;
+
   const sessionChecks = documents.flatMap((d) => ((d.validation_details as any)?.checks || []));
   const stats = {
     total: candidates.length,
     validated: candidates.filter((c) => c.status !== "fail").length,
     complete: calculateValidationScore(sessionChecks),
     issues: candidates.filter((c) => c.status !== "pass").length,
+    docsPassed: passedDocs,
+    docsFailed: failedDocs,
+    docsTotal: totalDocs,
   };
 
   const handleDownloadReport = () => {
