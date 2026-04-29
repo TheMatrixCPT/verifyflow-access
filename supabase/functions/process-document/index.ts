@@ -793,11 +793,11 @@ async function analyzeHandwriting(apiKey: string, fileUrl: string, fileName: str
     const mimeType = getMimeType(fileName);
     const userContent = isPdfFile(fileName)
       ? [
-          { type: "text", text: `Transcribe handwritten content and pen marks on this document (filename: "${fileName}"). Read every page.` },
+          { type: "text", text: `Transcribe handwritten content and pen marks on this document (filename: "${fileName}"). Read every page. Account for varied handwriting styles — block print, cursive, mixed, slanted, neat or messy — and treat stylized signatures and initials as present whenever a deliberate pen mark exists in the relevant area.` },
           { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}` } }
         ]
       : [
-          { type: "text", text: `Transcribe handwritten content and pen marks on this document (filename: "${fileName}").` },
+          { type: "text", text: `Transcribe handwritten content and pen marks on this document (filename: "${fileName}"). Account for varied handwriting styles — block print, cursive, mixed, slanted, neat or messy — and treat stylized signatures and initials as present whenever a deliberate pen mark exists in the relevant area.` },
           { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}`, detail: "high" } }
         ];
 
