@@ -1,88 +1,58 @@
 ## Goal
 
-Restructure the SessionDetail page filtering, stats, and document actions so reviewers think in **documents passed vs failed** (not percentages), warnings are treated as failures requiring action, and individual warning documents can be manually overridden into the validated bucket.
+On each candidate card (and matching modal header if applicable), replace the large percentage score (e.g. `86%`) and single status badge with **document pass/fail counts** so reviewers immediately see how many of the candidate's documents passed vs failed.
 
----
+## What changes visually
 
-## Scope of changes
+Currently each card shows on the right:
+```
+   86%
+  [Fail]
+```
 
-### 1. Treat "warning" as "fail" in the Filter tabs
+After the change it will show:
+```
+  3 / 5 passed
+  2 failed
+```
 
-In `src/pages/SessionDetail.tsx`, the `getDocumentsForFilter` helper currently filters strictly by `status === filter`. Update it so:
+- `passed` count rendered in green (`text-success`)
+- `failed` count rendered in red (`text-destructive`)
+- If all docs pass: only show `5 / 5 passed` in green, no failed line
+- If 0 docs: show `0 documents`
+- "Failed" includes documents with status `fail` or `warning` that are **not overridden** (consistent with the Failed tab logic already in `SessionDetail`)
+- Overridden documents count as passed
 
-- **All** tab → shows everything (unchanged).
-- **Validated** tab → shows only documents with status `pass` (or `pass` after override — see #3).
-- **Failed** tab → shows documents with status `fail` **or** `warning`.
+The colored left border and the bottom row (`N documents`, issues count) stay as-is, since they already convey status.
 
-The candidate-level `visibleStatus` derivation already collapses warnings into a non-pass bucket, so candidates surfaced under Failed will correctly include warning-only candidates.
+## Technical changes
 
-### 2. Replace the "Pass Rate %" stat with a document count visualization
+### `src/components/CandidateCard.tsx`
+- Remove the `{candidate.score}%` number and the single status badge from the right column.
+- Replace with a small two-line stat block computed from `candidate.documents`:
+  ```ts
+  const passed = candidate.documents.filter(
+    d => d.overridden || d.status === "pass"
+  ).length;
+  const failed = candidate.documents.filter(
+    d => !d.overridden && (d.status === "fail" || d.status === "warning")
+  ).length;
+  const total = candidate.documents.length;
+  ```
+- Render:
+  - Line 1: `<span class="text-success font-bold">{passed}</span> / {total} passed`
+  - Line 2 (only when `failed > 0`): `<span class="text-destructive font-semibold">{failed}</span> failed`
+- Keep the status-driven left border (`border-l-success | border-l-warning | border-l-error`) so the card still has an at-a-glance status color.
+- Drop the now-unused `statusConfig.badge` / `label` references in the card body (keep the icon mapping if still needed elsewhere; otherwise simplify).
 
-Today the third stat card shows `stats.complete%` (pass rate from checks). Replace that card so it shows **document counts** that adapt to the active filter, mirroring the user's spec.
+### `src/pages/SessionDetail.tsx`
+- No logic changes required — `candidate.documents` is already passed in with `overridden` and `status`. The existing `effectiveStatus` helper aligns with the same rule.
+- The top stats cards (`Documents X / Y`) already added in the previous change remain unchanged.
 
-New stat card: **Documents** — shows a fraction `X / Y` where `Y` is the total documents in view and `X` is the count relevant to the active tab:
-
-| Active filter | Display | Color of numerator | Color of denominator |
-|---|---|---|---|
-| All | `passed / total` (e.g. `10 / 20`) | green if ≥1 pass else neutral | red if any fail/warning else green |
-| Validated | `validated / total` (e.g. `12 / 20`) | green | neutral |
-| Failed | `failed / total` (e.g. `8 / 20`) | red | neutral |
-
-Counts are computed from the **document** array (not candidates), using:
-- `passedDocs = documents.filter(d => d.status === "pass" || d.overridden === true)`
-- `failedDocs = documents.filter(d => (d.status === "fail" || d.status === "warning") && !d.overridden)`
-- `totalDocs = documents.length`
-
-The other three stat cards (Candidates, Validated candidates, Issues) remain.
-
-### 3. Override action on warning documents
-
-Allow the reviewer to manually approve a `warning` document so it counts as validated.
-
-**Backend (migration):**
-- Add nullable column `documents.overridden boolean default false`.
-- Add nullable column `documents.overridden_at timestamptz`.
-- No RLS changes needed (existing "Anyone can update" policy already allows updates; this app is auth-free per project memory).
-
-**API (`src/lib/api.ts`):**
-- Add `overrideDocument(documentId: string)` which updates `overridden=true`, `overridden_at=now()`, and sets `validation_status='pass'` so existing aggregations and the Validated filter pick it up automatically.
-
-**UI (`src/components/CandidateModal.tsx` → `DocumentSection`):**
-- When `doc.status === "warning"` and not yet overridden, render a new **Override** action button next to "View" / "Download". Use the `ShieldCheck` icon (already imported) with label "Override" and a tooltip "Approve this document".
-- Clicking it opens a themed `AlertDialog` (per memory rule: never browser alerts) confirming "Approve this document despite warnings? It will be moved to Validated."
-- On confirm, call `overrideDocument`, invalidate the `documents` query, and toast "Document approved".
-- After override, show a small green "Approved (overridden)" pill instead of the warning badge.
-
-**Type updates:**
-- Extend `DocumentData` in `CandidateCard.tsx` with `overridden?: boolean`.
-- Map it through in `SessionDetail.tsx` candidate building (`overridden: d.overridden ?? false`).
-
-### 4. Status rollups
-
-Update `candidatesWithDocs` and `filtered` in `SessionDetail.tsx` so a document with `overridden === true` is treated as `pass` when computing:
-- candidate `status`
-- `visibleStatus`
-- the new Documents stat counts
-
-Centralize this with a small helper `effectiveStatus(doc)` returning `"pass"` if overridden, else `doc.status`.
-
----
-
-## Technical notes
-
-- `SessionCard.tsx` currently maps statuses (`complete | in-progress | has-issues`); no change required — session-level status is unaffected.
-- `validationScore.ts` (per-check scoring) is unchanged; we are only changing how stats are *displayed*, not how individual document scores are computed.
-- The CSV/PDF report generators read from `candidatesWithDocs` and remain functional; overridden docs naturally appear as `pass`.
+### Out of scope
+- The candidate `score` field stays in the data model (still used by reports/PDF/CSV); we just stop rendering it on the card.
+- No changes to `CandidateModal`, reports, or DB.
+- No changes to the session list cards (`SessionCard.tsx`).
 
 ## Files to change
-
-- `src/pages/SessionDetail.tsx` — filter logic, stats card, status helper, query mapping
-- `src/components/CandidateCard.tsx` — add `overridden` field to `DocumentData`
-- `src/components/CandidateModal.tsx` — Override button + confirm dialog in `DocumentSection`
-- `src/lib/api.ts` — add `overrideDocument`
-- New migration — add `overridden`, `overridden_at` columns to `documents`
-
-## Out of scope
-
-- No changes to the AI processing pipeline, scoring formula, or report templates.
-- No undo-override flow (can be added later if needed).
+- `src/components/CandidateCard.tsx`
