@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
-import { Upload, Download, ChevronDown, Search, Users, CheckCircle, AlertTriangle, ArrowLeft } from "lucide-react";
+import { Upload, Download, ChevronDown, Search, Users, CheckCircle, AlertTriangle, ArrowLeft, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Header from "@/components/Header";
 import CandidateCard from "@/components/CandidateCard";
