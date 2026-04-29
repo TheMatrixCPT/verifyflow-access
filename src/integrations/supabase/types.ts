@@ -100,6 +100,8 @@ export type Database = {
           file_size: number
           id: string
           issues: string[] | null
+          overridden: boolean
+          overridden_at: string | null
           processed_at: string | null
           session_id: string
           validation_details: Json | null
@@ -116,6 +118,8 @@ export type Database = {
           file_size?: number
           id?: string
           issues?: string[] | null
+          overridden?: boolean
+          overridden_at?: string | null
           processed_at?: string | null
           session_id: string
           validation_details?: Json | null
@@ -132,6 +136,8 @@ export type Database = {
           file_size?: number
           id?: string
           issues?: string[] | null
+          overridden?: boolean
+          overridden_at?: string | null
           processed_at?: string | null
           session_id?: string
           validation_details?: Json | null
