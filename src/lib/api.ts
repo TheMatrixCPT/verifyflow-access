@@ -747,15 +747,12 @@ export async function deleteCandidate(candidateId: string) {
   if (error) throw error;
 }
 
-// Settings
+// Settings — accessed via SECURITY DEFINER RPCs so the underlying table stays locked.
 export async function getSettings() {
-  const { data, error } = await supabase
-    .from("settings")
-    .select("*")
-    .limit(1)
-    .single();
+  const { data, error } = await (supabase.rpc as any)("get_app_settings");
   if (error) throw error;
-  return data;
+  const row = Array.isArray(data) ? data[0] : data;
+  return row || null;
 }
 
 export async function updateSettings(settings: {
@@ -764,12 +761,11 @@ export async function updateSettings(settings: {
   strict_mode: boolean;
   from_email?: string;
 }) {
-  const { data: existing } = await supabase.from("settings").select("id").limit(1).single();
-  if (!existing) throw new Error("No settings found");
-
-  const { error } = await supabase
-    .from("settings")
-    .update(settings)
-    .eq("id", existing.id);
+  const { error } = await (supabase.rpc as any)("update_app_settings", {
+    _confidence_threshold: settings.confidence_threshold,
+    _stamp_validity_months: settings.stamp_validity_months,
+    _strict_mode: settings.strict_mode,
+    _from_email: settings.from_email ?? null,
+  });
   if (error) throw error;
 }

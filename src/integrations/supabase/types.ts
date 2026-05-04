@@ -192,10 +192,8 @@ export type Database = {
       }
       settings: {
         Row: {
-          api_key_encrypted: string | null
           confidence_threshold: number
           created_at: string
-          email_api_key_encrypted: string | null
           from_email: string | null
           id: string
           stamp_validity_months: number
@@ -203,10 +201,8 @@ export type Database = {
           updated_at: string
         }
         Insert: {
-          api_key_encrypted?: string | null
           confidence_threshold?: number
           created_at?: string
-          email_api_key_encrypted?: string | null
           from_email?: string | null
           id?: string
           stamp_validity_months?: number
@@ -214,10 +210,8 @@ export type Database = {
           updated_at?: string
         }
         Update: {
-          api_key_encrypted?: string | null
           confidence_threshold?: number
           created_at?: string
-          email_api_key_encrypted?: string | null
           from_email?: string | null
           id?: string
           stamp_validity_months?: number
@@ -242,6 +236,16 @@ export type Database = {
         Returns: string
       }
       delete_admin_user: { Args: { _id: string }; Returns: undefined }
+      get_app_settings: {
+        Args: never
+        Returns: {
+          confidence_threshold: number
+          from_email: string
+          id: string
+          stamp_validity_months: number
+          strict_mode: boolean
+        }[]
+      }
       list_admin_users: {
         Args: never
         Returns: {
@@ -260,6 +264,15 @@ export type Database = {
           _name: string
           _password?: string
           _surname: string
+        }
+        Returns: undefined
+      }
+      update_app_settings: {
+        Args: {
+          _confidence_threshold: number
+          _from_email?: string
+          _stamp_validity_months: number
+          _strict_mode: boolean
         }
         Returns: undefined
       }
