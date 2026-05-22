@@ -107,6 +107,7 @@ const Assessment = () => {
         assessmentDate: formattedDate,
         passThreshold: threshold,
         questionOptions: data.questionOptions,
+        answerKey: answerKey ?? undefined,
       });
       saveAs(blob, `${makeFileNameSafe(r.name)}_Report.pdf`);
     } catch (err) {
