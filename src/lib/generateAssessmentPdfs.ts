@@ -196,6 +196,12 @@ export async function generateCertificate(opts: CertificateOptions): Promise<Blo
   return doc.output("blob");
 }
 
+export interface AnswerKeyEntry {
+  options: string[];
+  correctOption: string;
+  correctIndex: number;
+}
+
 interface ReportOptions {
   respondent: Respondent;
   assessmentTitle: string;
@@ -203,6 +209,25 @@ interface ReportOptions {
   passThreshold: number;
   /** All possible options per question (collected across respondents). */
   questionOptions: Record<string, string[]>;
+  /** Optional answer key keyed by question text. When present, all options are rendered with correct/incorrect marking. */
+  answerKey?: Record<string, AnswerKeyEntry>;
+}
+
+function normalizeForMatch(s: string): string {
+  return s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim();
+}
+
+function findOptionIndex(target: string, options: string[]): number {
+  if (!target) return -1;
+  const n = normalizeForMatch(target);
+  for (let i = 0; i < options.length; i++) {
+    if (normalizeForMatch(options[i]) === n) return i;
+  }
+  for (let i = 0; i < options.length; i++) {
+    const a = normalizeForMatch(options[i]);
+    if (a && (a.includes(n) || n.includes(a))) return i;
+  }
+  return -1;
 }
 
 function drawReportHeader(doc: jsPDF, assessmentTitle: string) {
