@@ -49,6 +49,9 @@ const Assessment = () => {
       setData(parsed);
       setFileName(file.name);
       setAssessmentTitle(parsed.formTitle);
+      setAnswerKey(null);
+      setKeyFileName("");
+      setKeyStats(null);
       toast.success(`Parsed ${parsed.respondents.length} respondents and ${parsed.questions.length} questions.`);
     } catch (err) {
       console.error(err);
