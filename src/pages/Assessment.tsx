@@ -163,6 +163,33 @@ const Assessment = () => {
     navigate("/login");
   };
 
+  const handleAnswerKeyFile = async (file: File | null) => {
+    if (!file || !data) return;
+    setKeyExtracting(true);
+    try {
+      const result = await extractAnswerKey(file, data.questions);
+      setAnswerKey(result.answerKey);
+      setKeyFileName(file.name);
+      setKeyStats({ matched: result.matched, total: result.total });
+      if (result.matched === 0) {
+        toast.warning("Could not match any questions from the answer key to the assessment.");
+      } else {
+        toast.success(`Answer key loaded: matched ${result.matched} of ${result.total} questions.`);
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error(err instanceof Error ? err.message : "Failed to extract answer key.");
+    } finally {
+      setKeyExtracting(false);
+    }
+  };
+
+  const clearAnswerKey = () => {
+    setAnswerKey(null);
+    setKeyFileName("");
+    setKeyStats(null);
+  };
+
   return (
     <div className="min-h-screen bg-background">
       {/* Top bar */}
