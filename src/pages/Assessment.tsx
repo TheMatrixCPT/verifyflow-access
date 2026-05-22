@@ -133,6 +133,7 @@ const Assessment = () => {
           assessmentDate: formattedDate,
           passThreshold: threshold,
           questionOptions: data.questionOptions,
+          answerKey: answerKey ?? undefined,
         });
         reportFolder?.file(`${makeFileNameSafe(r.name)}_Report.pdf`, reportBlob);
 
