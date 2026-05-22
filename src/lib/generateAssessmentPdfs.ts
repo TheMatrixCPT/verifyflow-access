@@ -281,7 +281,7 @@ function drawReportFooter(doc: jsPDF, name: string, title: string) {
 
 /** Generate the assessment results report (portrait A4) — matches CAPACITI template. */
 export async function generateReport(opts: ReportOptions): Promise<Blob> {
-  const { respondent, assessmentTitle, assessmentDate, passThreshold, questionOptions } = opts;
+  const { respondent, assessmentTitle, assessmentDate, passThreshold, questionOptions, answerKey } = opts;
   const doc = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
