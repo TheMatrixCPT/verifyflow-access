@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Upload, FileSpreadsheet, Download, Award, FileText, Loader2, ArrowLeft, LogOut, X } from "lucide-react";
+import { Upload, FileSpreadsheet, Download, Award, FileText, Loader2, ArrowLeft, LogOut, X, Key, CheckCircle2 } from "lucide-react";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,7 @@ import {
   formatAssessmentDate,
   makeFileNameSafe,
 } from "@/lib/generateAssessmentPdfs";
+import { extractAnswerKey, type AnswerKey } from "@/lib/answerKeyExtractor";
 
 const Assessment = () => {
   const navigate = useNavigate();
@@ -29,6 +30,10 @@ const Assessment = () => {
   );
   const [threshold, setThreshold] = useState<number>(75);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [answerKey, setAnswerKey] = useState<AnswerKey | null>(null);
+  const [keyFileName, setKeyFileName] = useState<string>("");
+  const [keyExtracting, setKeyExtracting] = useState(false);
+  const [keyStats, setKeyStats] = useState<{ matched: number; total: number } | null>(null);
 
   const handleFile = async (file: File | null) => {
     if (!file) return;
