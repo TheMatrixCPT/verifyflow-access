@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Upload, FileSpreadsheet, Download, Award, FileText, Loader2, ArrowLeft, LogOut, X } from "lucide-react";
+import { Upload, FileSpreadsheet, Download, Award, FileText, Loader2, ArrowLeft, LogOut, X, Key, CheckCircle2 } from "lucide-react";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,7 @@ import {
   formatAssessmentDate,
   makeFileNameSafe,
 } from "@/lib/generateAssessmentPdfs";
+import { extractAnswerKey, type AnswerKey } from "@/lib/answerKeyExtractor";
 
 const Assessment = () => {
   const navigate = useNavigate();
@@ -29,6 +30,10 @@ const Assessment = () => {
   );
   const [threshold, setThreshold] = useState<number>(75);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [answerKey, setAnswerKey] = useState<AnswerKey | null>(null);
+  const [keyFileName, setKeyFileName] = useState<string>("");
+  const [keyExtracting, setKeyExtracting] = useState(false);
+  const [keyStats, setKeyStats] = useState<{ matched: number; total: number } | null>(null);
 
   const handleFile = async (file: File | null) => {
     if (!file) return;
@@ -44,6 +49,9 @@ const Assessment = () => {
       setData(parsed);
       setFileName(file.name);
       setAssessmentTitle(parsed.formTitle);
+      setAnswerKey(null);
+      setKeyFileName("");
+      setKeyStats(null);
       toast.success(`Parsed ${parsed.respondents.length} respondents and ${parsed.questions.length} questions.`);
     } catch (err) {
       console.error(err);
@@ -99,6 +107,7 @@ const Assessment = () => {
         assessmentDate: formattedDate,
         passThreshold: threshold,
         questionOptions: data.questionOptions,
+        answerKey: answerKey ?? undefined,
       });
       saveAs(blob, `${makeFileNameSafe(r.name)}_Report.pdf`);
     } catch (err) {
@@ -124,6 +133,7 @@ const Assessment = () => {
           assessmentDate: formattedDate,
           passThreshold: threshold,
           questionOptions: data.questionOptions,
+          answerKey: answerKey ?? undefined,
         });
         reportFolder?.file(`${makeFileNameSafe(r.name)}_Report.pdf`, reportBlob);
 
@@ -151,6 +161,33 @@ const Assessment = () => {
   const handleLogout = async () => {
     await logout();
     navigate("/login");
+  };
+
+  const handleAnswerKeyFile = async (file: File | null) => {
+    if (!file || !data) return;
+    setKeyExtracting(true);
+    try {
+      const result = await extractAnswerKey(file, data.questions);
+      setAnswerKey(result.answerKey);
+      setKeyFileName(file.name);
+      setKeyStats({ matched: result.matched, total: result.total });
+      if (result.matched === 0) {
+        toast.warning("Could not match any questions from the answer key to the assessment.");
+      } else {
+        toast.success(`Answer key loaded: matched ${result.matched} of ${result.total} questions.`);
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error(err instanceof Error ? err.message : "Failed to extract answer key.");
+    } finally {
+      setKeyExtracting(false);
+    }
+  };
+
+  const clearAnswerKey = () => {
+    setAnswerKey(null);
+    setKeyFileName("");
+    setKeyStats(null);
   };
 
   return (
@@ -303,7 +340,64 @@ const Assessment = () => {
                   />
                 </div>
               </div>
+
+              {/* Answer Key upload */}
+              <div className="mt-6 pt-6 border-t border-border">
+                <div className="flex items-start justify-between mb-3">
+                  <div>
+                    <label className="vf-label flex items-center gap-2">
+                      <Key className="h-3.5 w-3.5 text-purple" />
+                      Answer Key Document (optional)
+                    </label>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Upload a PDF, DOCX, or image containing the questions and correct answers.
+                      The result report will show every option and highlight the candidate's choice + the correct answer.
+                    </p>
+                  </div>
+                  {answerKey && (
+                    <Button variant="outline" size="sm" onClick={clearAnswerKey}>
+                      <X className="h-4 w-4 mr-1" />
+                      Clear
+                    </Button>
+                  )}
+                </div>
+
+                <label
+                  htmlFor="answer-key-input"
+                  className="block border-2 border-dashed border-border rounded-xl p-5 text-center cursor-pointer hover:border-purple/50 hover:bg-muted/50 transition-colors"
+                >
+                  <input
+                    id="answer-key-input"
+                    type="file"
+                    accept=".pdf,.docx,.png,.jpg,.jpeg,application/pdf,image/*"
+                    className="hidden"
+                    onChange={(e) => handleAnswerKeyFile(e.target.files?.[0] ?? null)}
+                  />
+                  {keyExtracting ? (
+                    <div className="flex items-center justify-center gap-2 text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span className="text-sm">Extracting answer key with AI…</span>
+                    </div>
+                  ) : answerKey && keyStats ? (
+                    <div className="flex items-center justify-center gap-3 text-space-kadet flex-wrap">
+                      <CheckCircle2 className="h-5 w-5 text-success" />
+                      <span className="font-medium text-sm">{keyFileName}</span>
+                      <Badge variant={keyStats.matched === keyStats.total ? "default" : "secondary"}>
+                        Matched {keyStats.matched} of {keyStats.total} questions
+                      </Badge>
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      <Upload className="h-6 w-6 text-muted-foreground mx-auto" />
+                      <p className="text-sm font-medium text-space-kadet">Click to upload answer key</p>
+                      <p className="text-xs text-muted-foreground">PDF, DOCX, PNG, or JPG</p>
+                    </div>
+                  )}
+                </label>
+              </div>
             </section>
+
+
 
             {/* Stats + bulk action */}
             <section className="vf-card">
