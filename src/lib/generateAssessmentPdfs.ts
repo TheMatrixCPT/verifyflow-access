@@ -391,25 +391,19 @@ export async function generateReport(opts: ReportOptions): Promise<Blob> {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
     doc.setTextColor(...MUTED);
-    // green swatch = Correct answer
+    // green swatch
     doc.setFillColor(...SUCCESS_BG);
     doc.setDrawColor(...SUCCESS);
     doc.setLineWidth(0.4);
     doc.roundedRect(marginX, legendY - 3, 4, 4, 0.6, 0.6, "FD");
-    doc.text("Correct answer", marginX + 6, legendY);
-    // purple swatch = Your choice
-    const x2 = marginX + 42;
-    doc.setFillColor(...LIGHT_PURPLE_BG);
-    doc.setDrawColor(...PURPLE);
-    doc.roundedRect(x2, legendY - 3, 4, 4, 0.6, 0.6, "FD");
-    doc.text("Your choice (correct)", x2 + 6, legendY);
-    // red swatch = Wrong choice
-    const x3 = marginX + 100;
+    doc.text("Your answer (correct)", marginX + 6, legendY);
+    // red swatch
+    const x2 = marginX + 62;
     doc.setFillColor(...FAIL_BG);
     doc.setDrawColor(...CORAL);
-    doc.roundedRect(x3, legendY - 3, 4, 4, 0.6, 0.6, "FD");
-    doc.text("Your choice (wrong)", x3 + 6, legendY);
-    y += 7;
+    doc.roundedRect(x2, legendY - 3, 4, 4, 0.6, 0.6, "FD");
+    doc.text("Your answer (incorrect)", x2 + 6, legendY);
+    y += 9;
   }
 
   // Helper: render a tick or cross icon at (x,y)
