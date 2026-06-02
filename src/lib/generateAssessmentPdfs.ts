@@ -406,32 +406,26 @@ export async function generateReport(opts: ReportOptions): Promise<Blob> {
     y += 9;
   }
 
-  // Helper: render a tick or cross icon at (x,y)
-  const drawTick = (cx: number, cy: number, color: [number, number, number]) => {
-    doc.setDrawColor(...color);
-    doc.setLineWidth(0.9);
-    doc.line(cx - 1.6, cy + 0.2, cx - 0.4, cy + 1.4);
-    doc.line(cx - 0.4, cy + 1.4, cx + 1.8, cy - 1.4);
-  };
-  const drawCross = (cx: number, cy: number, color: [number, number, number]) => {
-    doc.setDrawColor(...color);
-    doc.setLineWidth(0.9);
-    doc.line(cx - 1.4, cy - 1.4, cx + 1.4, cy + 1.4);
-    doc.line(cx - 1.4, cy + 1.4, cx + 1.4, cy - 1.4);
-  };
-
+  type OptionState = "neutral" | "selected-correct" | "selected-wrong" | "selected-unknown";
   type OptionRender = {
     lines: string[];
-    state: "neutral" | "selected-correct" | "selected-wrong" | "correct-only" | "selected-only";
-    caption?: string;
+    state: OptionState;
   };
+
+  const PILL_PAD_X = 12;        // left text inset (after bullet)
+  const PILL_PAD_RIGHT = 32;    // reserve space for the right-side label
+  const LINE_HEIGHT = 5.0;
+  const PILL_TOP_PAD = 2.2;
+  const PILL_BOTTOM_PAD = 3.0;
+  const OPTION_GAP = 2.0;       // vertical gap between options
+  const QUESTION_GAP = 8.0;     // gap after a question's options end
 
   respondent.answers.forEach((qa, i) => {
     const selected = (qa.selected || "").trim();
     const noAnswer = !selected;
     const key = answerKey?.[qa.question];
 
-    // Build the list of options to render for this question
+    // Build option list
     const renders: OptionRender[] = [];
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10.5);
@@ -439,49 +433,38 @@ export async function generateReport(opts: ReportOptions): Promise<Blob> {
     if (key && key.options.length > 0) {
       const selectedIdx = noAnswer ? -1 : findOptionIndex(selected, key.options);
       key.options.forEach((opt, idx) => {
-        const isCorrect = idx === key.correctIndex;
         const isSelected = idx === selectedIdx;
-        let state: OptionRender["state"] = "neutral";
-        let caption: string | undefined;
-        if (isSelected && isCorrect) {
-          state = "selected-correct";
-          caption = "Your answer · Correct";
-        } else if (isSelected && !isCorrect) {
-          state = "selected-wrong";
-          caption = "Your answer";
-        } else if (!isSelected && isCorrect) {
-          state = "correct-only";
-          caption = "Correct answer";
-        }
-        const lines = doc.splitTextToSize(opt, usableW - 22);
-        renders.push({ lines, state, caption });
+        const isCorrect = idx === key.correctIndex;
+        let state: OptionState = "neutral";
+        if (isSelected && isCorrect) state = "selected-correct";
+        else if (isSelected && !isCorrect) state = "selected-wrong";
+        const lines = doc.splitTextToSize(opt, usableW - PILL_PAD_X - PILL_PAD_RIGHT);
+        renders.push({ lines, state });
       });
-      // If candidate's selected text didn't match any option, append it as a wrong selection
+      // Selected value not in extracted options → render it as a wrong selection
       if (!noAnswer && selectedIdx === -1) {
-        const lines = doc.splitTextToSize(selected, usableW - 22);
-        renders.push({ lines, state: "selected-wrong", caption: "Your answer (not in key)" });
+        const lines = doc.splitTextToSize(selected, usableW - PILL_PAD_X - PILL_PAD_RIGHT);
+        renders.push({ lines, state: "selected-wrong" });
       }
     } else if (noAnswer) {
-      renders.push({ lines: doc.splitTextToSize("(No answer provided)", usableW - 22), state: "neutral" });
+      const lines = doc.splitTextToSize("(No answer provided)", usableW - PILL_PAD_X - PILL_PAD_RIGHT);
+      renders.push({ lines, state: "neutral" });
     } else {
-      renders.push({
-        lines: doc.splitTextToSize(selected, usableW - 22),
-        state: "selected-only",
-        caption: "Your answer",
-      });
+      const lines = doc.splitTextToSize(selected, usableW - PILL_PAD_X - PILL_PAD_RIGHT);
+      renders.push({ lines, state: "selected-unknown" });
     }
 
-    // Measure block height
+    // Measure block height for page-break
     doc.setFont("helvetica", "bold");
     doc.setFontSize(11);
     const qLines = doc.splitTextToSize(`Q${i + 1}. ${qa.question || "(no question text)"}`, usableW);
-
+    const qHeight = qLines.length * 5.6 + 4;
     let optionsBlockH = 0;
     for (const r of renders) {
-      const pillH = r.lines.length * 5.4 + 5;
-      optionsBlockH += pillH + 1 + (r.caption ? 4 : 0);
+      const pillH = r.lines.length * LINE_HEIGHT + PILL_TOP_PAD + PILL_BOTTOM_PAD;
+      optionsBlockH += pillH + OPTION_GAP;
     }
-    const blockH = qLines.length * 6.2 + 5 + optionsBlockH + 7;
+    const blockH = qHeight + optionsBlockH + QUESTION_GAP;
 
     // Page break
     if (y + blockH > pageH - 18) {
@@ -491,38 +474,25 @@ export async function generateReport(opts: ReportOptions): Promise<Blob> {
       y = 50;
     }
 
-    // Question
+    // Question text
     doc.setTextColor(...INK);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(11);
-    doc.text(qLines, marginX, y);
-    y += qLines.length * 6.2 + 5;
+    doc.text(qLines, marginX, y + 4);
+    y += qHeight;
 
-    // Render options
+    // Options
     for (const r of renders) {
-      const pillH = r.lines.length * 5.4 + 5;
+      const pillH = r.lines.length * LINE_HEIGHT + PILL_TOP_PAD + PILL_BOTTOM_PAD;
 
-      if (r.caption) {
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(9);
-        const capColor: [number, number, number] =
-          r.state === "selected-correct" ? SUCCESS :
-          r.state === "selected-wrong" ? CORAL :
-          r.state === "correct-only" ? SUCCESS :
-          PURPLE;
-        doc.setTextColor(...capColor);
-        doc.text(r.caption, marginX + usableW, y, { align: "right" });
-        y += 4;
-      }
-
-      // Pill background + outline based on state
+      // Style by state
       let fill: [number, number, number] | null = null;
-      let stroke: [number, number, number] = [180, 184, 200];
+      let stroke: [number, number, number] = [200, 204, 214];
       let bulletFill: [number, number, number] | null = null;
       let textColor: [number, number, number] = INK;
       let bold = false;
-      let iconAtRight: "tick" | "cross" | null = null;
-      let iconColor: [number, number, number] = SUCCESS;
+      let label: string | null = null;
+      let labelColor: [number, number, number] = SUCCESS;
 
       switch (r.state) {
         case "selected-correct":
@@ -531,8 +501,8 @@ export async function generateReport(opts: ReportOptions): Promise<Blob> {
           bulletFill = SUCCESS;
           textColor = NAVY;
           bold = true;
-          iconAtRight = "tick";
-          iconColor = SUCCESS;
+          label = "Correct";
+          labelColor = SUCCESS;
           break;
         case "selected-wrong":
           fill = FAIL_BG;
@@ -540,19 +510,10 @@ export async function generateReport(opts: ReportOptions): Promise<Blob> {
           bulletFill = CORAL;
           textColor = NAVY;
           bold = true;
-          iconAtRight = "cross";
-          iconColor = CORAL;
+          label = "Incorrect";
+          labelColor = CORAL;
           break;
-        case "correct-only":
-          fill = null;
-          stroke = SUCCESS;
-          bulletFill = null;
-          textColor = INK;
-          bold = false;
-          iconAtRight = "tick";
-          iconColor = SUCCESS;
-          break;
-        case "selected-only":
+        case "selected-unknown":
           fill = LIGHT_PURPLE_BG;
           stroke = PURPLE;
           bulletFill = PURPLE;
@@ -561,49 +522,48 @@ export async function generateReport(opts: ReportOptions): Promise<Blob> {
           break;
         case "neutral":
         default:
-          fill = null;
-          stroke = [180, 184, 200];
-          bulletFill = null;
-          textColor = INK;
-          bold = false;
+          break;
       }
 
+      // Pill
       doc.setDrawColor(...stroke);
       doc.setLineWidth(0.4);
       if (fill) {
         doc.setFillColor(...fill);
-        doc.roundedRect(marginX, y - 1, usableW, pillH, 1.2, 1.2, "FD");
+        doc.roundedRect(marginX, y, usableW, pillH, 1.4, 1.4, "FD");
       } else {
-        doc.roundedRect(marginX, y - 1, usableW, pillH, 1.2, 1.2, "S");
+        doc.roundedRect(marginX, y, usableW, pillH, 1.4, 1.4, "S");
       }
 
-      // Bullet
+      // Bullet (vertically centered)
+      const bulletY = y + pillH / 2;
       if (bulletFill) {
         doc.setFillColor(...bulletFill);
-        doc.circle(marginX + 6, y + 3.2, 1.4, "F");
+        doc.circle(marginX + 6, bulletY, 1.4, "F");
       } else {
         doc.setDrawColor(...stroke);
-        doc.circle(marginX + 6, y + 3.2, 1.4, "S");
+        doc.circle(marginX + 6, bulletY, 1.4, "S");
       }
 
-      // Option text
+      // Option text — baseline of first line
       doc.setFont("helvetica", bold ? "bold" : "normal");
       doc.setFontSize(10.5);
       doc.setTextColor(...textColor);
-      doc.text(r.lines, marginX + 12, y + 4.2);
+      const textBaseline = y + PILL_TOP_PAD + LINE_HEIGHT - 1.2;
+      doc.text(r.lines, marginX + PILL_PAD_X, textBaseline, { lineHeightFactor: 1.15 });
 
-      // Right-side icon
-      if (iconAtRight) {
-        const ix = marginX + usableW - 5;
-        const iy = y + 3.2;
-        if (iconAtRight === "tick") drawTick(ix, iy, iconColor);
-        else drawCross(ix, iy, iconColor);
+      // Right-side label (vertically centered)
+      if (label) {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(9);
+        doc.setTextColor(...labelColor);
+        doc.text(label, marginX + usableW - 4, bulletY + 1.2, { align: "right" });
       }
 
-      y += pillH + 1;
+      y += pillH + OPTION_GAP;
     }
 
-    y += 7;
+    y += QUESTION_GAP;
   });
 
   drawReportFooter(doc, respondent.name, assessmentTitle);
