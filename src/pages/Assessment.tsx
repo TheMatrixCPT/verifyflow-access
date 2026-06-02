@@ -76,6 +76,12 @@ const Assessment = () => {
 
   const formattedDate = useMemo(() => formatAssessmentDate(assessmentDate), [assessmentDate]);
 
+  /** Use the candidate's actual completion/start time when available, otherwise fall back to the page-level date. */
+  const dateForRespondent = (r: Respondent): string => {
+    const candidateDate = r.completionTime || r.startTime;
+    return candidateDate ? formatAssessmentDate(candidateDate) : formattedDate;
+  };
+
   const downloadCertificate = async (r: Respondent) => {
     if (r.percent === null || r.percent < threshold) {
       toast.error(`${r.name} did not meet the ${threshold}% pass threshold.`);
@@ -86,7 +92,7 @@ const Assessment = () => {
       const blob = await generateCertificate({
         respondent: r,
         assessmentTitle,
-        assessmentDate: formattedDate,
+        assessmentDate: dateForRespondent(r),
       });
       saveAs(blob, `${makeFileNameSafe(r.name)}_Certificate.pdf`);
     } catch (err) {
@@ -104,7 +110,7 @@ const Assessment = () => {
       const blob = await generateReport({
         respondent: r,
         assessmentTitle,
-        assessmentDate: formattedDate,
+        assessmentDate: dateForRespondent(r),
         passThreshold: threshold,
         questionOptions: data.questionOptions,
         answerKey: answerKey ?? undefined,
@@ -127,10 +133,11 @@ const Assessment = () => {
       const reportFolder = zip.folder("reports");
 
       for (const r of data.respondents) {
+        const dateStr = dateForRespondent(r);
         const reportBlob = await generateReport({
           respondent: r,
           assessmentTitle,
-          assessmentDate: formattedDate,
+          assessmentDate: dateStr,
           passThreshold: threshold,
           questionOptions: data.questionOptions,
           answerKey: answerKey ?? undefined,
@@ -141,7 +148,7 @@ const Assessment = () => {
           const certBlob = await generateCertificate({
             respondent: r,
             assessmentTitle,
-            assessmentDate: formattedDate,
+            assessmentDate: dateStr,
           });
           certFolder?.file(`${makeFileNameSafe(r.name)}_Certificate.pdf`, certBlob);
         }
