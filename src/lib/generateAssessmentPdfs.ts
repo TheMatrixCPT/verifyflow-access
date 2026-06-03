@@ -1,6 +1,36 @@
 import jsPDF from "jspdf";
 import { format } from "date-fns";
 import type { Respondent } from "./assessmentParser";
+import capacitiLogoUrl from "@/assets/capaciti-logo.png";
+
+// Logo aspect ratio (width / height) for the trimmed CAPACITI mark.
+const LOGO_ASPECT = 1299 / 277;
+
+let _logoDataUrl: string | null = null;
+async function getLogoDataUrl(): Promise<string> {
+  if (_logoDataUrl) return _logoDataUrl;
+  const res = await fetch(capacitiLogoUrl);
+  const blob = await res.blob();
+  _logoDataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+  return _logoDataUrl;
+}
+
+function drawLogo(
+  doc: jsPDF,
+  dataUrl: string,
+  x: number,
+  y: number,
+  height: number,
+) {
+  const width = height * LOGO_ASPECT;
+  doc.addImage(dataUrl, "PNG", x, y, width, height, undefined, "FAST");
+  return { width, height };
+}
 
 // CAPACITI palette (from template)
 const NAVY: [number, number, number] = [27, 27, 92];        // deep indigo navy
@@ -168,30 +198,18 @@ export async function generateCertificate(opts: CertificateOptions): Promise<Blo
   doc.setFontSize(11);
   doc.text(`Date: ${assessmentDate}`, pageW / 2, 244, { align: "center" });
 
-  // CAPACITI mark centered near bottom
-  const markY = 268;
-  const markText = "CAPACITI";
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(13);
-  const markTextW = doc.getTextWidth(markText);
-  const dotR = 2.6;
-  const totalW = dotR * 2 + 2.5 + markTextW;
-  const startX = (pageW - totalW) / 2;
-  // red ring
-  doc.setFillColor(...CORAL);
-  doc.circle(startX + dotR, markY - 1.2, dotR, "F");
-  // navy inner
-  doc.setFillColor(...NAVY);
-  doc.circle(startX + dotR, markY - 1.2, dotR * 0.45, "F");
-  // text
-  doc.setTextColor(...NAVY);
-  doc.text(markText, startX + dotR * 2 + 2.5, markY);
+  // CAPACITI logo centered near bottom
+  const logoH = 16;
+  const logoW = logoH * LOGO_ASPECT;
+  const logoY = 262;
+  const logoDataUrl = await getLogoDataUrl();
+  drawLogo(doc, logoDataUrl, (pageW - logoW) / 2, logoY, logoH);
 
   // "Issued by CAPACITI"
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.setTextColor(...MUTED);
-  doc.text("Issued by CAPACITI", pageW / 2, markY + 6, { align: "center" });
+  doc.text("Issued by CAPACITI", pageW / 2, logoY + logoH + 5, { align: "center" });
 
   return doc.output("blob");
 }
@@ -230,7 +248,7 @@ function findOptionIndex(target: string, options: string[]): number {
   return -1;
 }
 
-function drawReportHeader(doc: jsPDF, assessmentTitle: string) {
+function drawReportHeader(doc: jsPDF, assessmentTitle: string, logoDataUrl: string) {
   const pageW = doc.internal.pageSize.getWidth();
 
   // Top tri-color stripe (coral | purple | navy)
@@ -245,8 +263,9 @@ function drawReportHeader(doc: jsPDF, assessmentTitle: string) {
   doc.setFillColor(...NAVY);
   doc.rect(seg1 + seg2, stripeY, pageW - seg1 - seg2, stripeH, "F");
 
-  // CAPACITI mark
-  drawCapacitiMark(doc, 18, 18, 1);
+  // CAPACITI logo
+  const headerLogoH = 11;
+  drawLogo(doc, logoDataUrl, 14, 10, headerLogoH);
 
   // "Assessment Results Report"
   doc.setFont("helvetica", "bold");
@@ -288,7 +307,8 @@ export async function generateReport(opts: ReportOptions): Promise<Blob> {
   const marginX = 14;
   const usableW = pageW - marginX * 2;
 
-  drawReportHeader(doc, assessmentTitle);
+  const logoDataUrl = await getLogoDataUrl();
+  drawReportHeader(doc, assessmentTitle, logoDataUrl);
 
   // Summary card (light gray rounded box)
   let y = 50;
@@ -482,7 +502,7 @@ export async function generateReport(opts: ReportOptions): Promise<Blob> {
     if (y + blockH > pageH - 18) {
       drawReportFooter(doc, respondent.name, assessmentTitle);
       doc.addPage();
-      drawReportHeader(doc, assessmentTitle);
+      drawReportHeader(doc, assessmentTitle, logoDataUrl);
       y = 50;
     }
 
