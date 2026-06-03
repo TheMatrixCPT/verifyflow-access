@@ -1,6 +1,36 @@
 import jsPDF from "jspdf";
 import { format } from "date-fns";
 import type { Respondent } from "./assessmentParser";
+import capacitiLogoUrl from "@/assets/capaciti-logo.png";
+
+// Logo aspect ratio (width / height) for the trimmed CAPACITI mark.
+const LOGO_ASPECT = 1299 / 277;
+
+let _logoDataUrl: string | null = null;
+async function getLogoDataUrl(): Promise<string> {
+  if (_logoDataUrl) return _logoDataUrl;
+  const res = await fetch(capacitiLogoUrl);
+  const blob = await res.blob();
+  _logoDataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+  return _logoDataUrl;
+}
+
+function drawLogo(
+  doc: jsPDF,
+  dataUrl: string,
+  x: number,
+  y: number,
+  height: number,
+) {
+  const width = height * LOGO_ASPECT;
+  doc.addImage(dataUrl, "PNG", x, y, width, height, undefined, "FAST");
+  return { width, height };
+}
 
 // CAPACITI palette (from template)
 const NAVY: [number, number, number] = [27, 27, 92];        // deep indigo navy
