@@ -301,21 +301,32 @@ export async function generateReport(opts: ReportOptions): Promise<Blob> {
   const labelColor = MUTED;
   const valueColor = NAVY;
 
+  // Layout: left column NAME/EMAIL, right column SCORE/DATE, then PASS/FAIL badge.
+  const badgeW = 38;
+  const badgeH = 16;
+  const badgeX = marginX + usableW - badgeW - 6;
+  const badgeY = y + 6;
+
+  const leftX = marginX + 6;
+  const rightX = marginX + 95;
+  const leftColW = rightX - leftX - 6;
+  const rightColW = badgeX - rightX - 6;
+
   // NAME
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
   doc.setTextColor(...labelColor);
-  doc.text("NAME", marginX + 6, y + 8);
+  doc.text("NAME", leftX, y + 8);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(13);
   doc.setTextColor(...valueColor);
-  doc.text(respondent.name, marginX + 6, y + 15);
+  doc.text(doc.splitTextToSize(respondent.name, leftColW)[0] ?? respondent.name, leftX, y + 15);
 
   // SCORE
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
   doc.setTextColor(...labelColor);
-  doc.text("SCORE", marginX + 70, y + 8);
+  doc.text("SCORE", rightX, y + 8);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(13);
   doc.setTextColor(...valueColor);
@@ -327,33 +338,34 @@ export async function generateReport(opts: ReportOptions): Promise<Blob> {
       : respondent.rawScore !== null
         ? `${respondent.rawScore}`
         : "—";
-  doc.text(scoreLine, marginX + 70, y + 15);
+  doc.text(scoreLine, rightX, y + 15);
 
-  // EMAIL
+  // EMAIL — auto-shrink font size so the address fits within the left column.
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
   doc.setTextColor(...labelColor);
-  doc.text("EMAIL", marginX + 6, y + 25);
+  doc.text("EMAIL", leftX, y + 25);
+  const emailText = respondent.email || "—";
+  let emailFontSize = 11;
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
+  doc.setFontSize(emailFontSize);
+  while (doc.getTextWidth(emailText) > leftColW && emailFontSize > 7) {
+    emailFontSize -= 0.5;
+    doc.setFontSize(emailFontSize);
+  }
   doc.setTextColor(...valueColor);
-  doc.text(respondent.email || "—", marginX + 6, y + 32);
+  doc.text(emailText, leftX, y + 32);
 
   // DATE
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
   doc.setTextColor(...labelColor);
-  doc.text("DATE", marginX + 70, y + 25);
+  doc.text("DATE", rightX, y + 25);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
   doc.setTextColor(...valueColor);
-  doc.text(assessmentDate, marginX + 70, y + 32);
+  doc.text(doc.splitTextToSize(assessmentDate, rightColW)[0] ?? assessmentDate, rightX, y + 32);
 
-  // PASS / FAIL badge (top-right of card)
-  const badgeW = 38;
-  const badgeH = 16;
-  const badgeX = marginX + usableW - badgeW - 6;
-  const badgeY = y + 6;
   if (passed) {
     doc.setFillColor(...SUCCESS_BG);
     doc.setDrawColor(...SUCCESS);
