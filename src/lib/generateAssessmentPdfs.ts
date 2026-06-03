@@ -307,7 +307,8 @@ export async function generateReport(opts: ReportOptions): Promise<Blob> {
   const marginX = 14;
   const usableW = pageW - marginX * 2;
 
-  drawReportHeader(doc, assessmentTitle);
+  const logoDataUrl = await getLogoDataUrl();
+  drawReportHeader(doc, assessmentTitle, logoDataUrl);
 
   // Summary card (light gray rounded box)
   let y = 50;
