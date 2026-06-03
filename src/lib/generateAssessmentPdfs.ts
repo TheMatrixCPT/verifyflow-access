@@ -502,7 +502,7 @@ export async function generateReport(opts: ReportOptions): Promise<Blob> {
     if (y + blockH > pageH - 18) {
       drawReportFooter(doc, respondent.name, assessmentTitle);
       doc.addPage();
-      drawReportHeader(doc, assessmentTitle);
+      drawReportHeader(doc, assessmentTitle, logoDataUrl);
       y = 50;
     }
 
