@@ -198,30 +198,18 @@ export async function generateCertificate(opts: CertificateOptions): Promise<Blo
   doc.setFontSize(11);
   doc.text(`Date: ${assessmentDate}`, pageW / 2, 244, { align: "center" });
 
-  // CAPACITI mark centered near bottom
-  const markY = 268;
-  const markText = "CAPACITI";
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(13);
-  const markTextW = doc.getTextWidth(markText);
-  const dotR = 2.6;
-  const totalW = dotR * 2 + 2.5 + markTextW;
-  const startX = (pageW - totalW) / 2;
-  // red ring
-  doc.setFillColor(...CORAL);
-  doc.circle(startX + dotR, markY - 1.2, dotR, "F");
-  // navy inner
-  doc.setFillColor(...NAVY);
-  doc.circle(startX + dotR, markY - 1.2, dotR * 0.45, "F");
-  // text
-  doc.setTextColor(...NAVY);
-  doc.text(markText, startX + dotR * 2 + 2.5, markY);
+  // CAPACITI logo centered near bottom
+  const logoH = 16;
+  const logoW = logoH * LOGO_ASPECT;
+  const logoY = 262;
+  const logoDataUrl = await getLogoDataUrl();
+  drawLogo(doc, logoDataUrl, (pageW - logoW) / 2, logoY, logoH);
 
   // "Issued by CAPACITI"
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.setTextColor(...MUTED);
-  doc.text("Issued by CAPACITI", pageW / 2, markY + 6, { align: "center" });
+  doc.text("Issued by CAPACITI", pageW / 2, logoY + logoH + 5, { align: "center" });
 
   return doc.output("blob");
 }
