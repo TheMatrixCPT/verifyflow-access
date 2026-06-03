@@ -248,7 +248,7 @@ function findOptionIndex(target: string, options: string[]): number {
   return -1;
 }
 
-function drawReportHeader(doc: jsPDF, assessmentTitle: string) {
+function drawReportHeader(doc: jsPDF, assessmentTitle: string, logoDataUrl: string) {
   const pageW = doc.internal.pageSize.getWidth();
 
   // Top tri-color stripe (coral | purple | navy)
@@ -263,8 +263,9 @@ function drawReportHeader(doc: jsPDF, assessmentTitle: string) {
   doc.setFillColor(...NAVY);
   doc.rect(seg1 + seg2, stripeY, pageW - seg1 - seg2, stripeH, "F");
 
-  // CAPACITI mark
-  drawCapacitiMark(doc, 18, 18, 1);
+  // CAPACITI logo
+  const headerLogoH = 11;
+  drawLogo(doc, logoDataUrl, 14, 10, headerLogoH);
 
   // "Assessment Results Report"
   doc.setFont("helvetica", "bold");
