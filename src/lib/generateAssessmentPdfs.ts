@@ -205,11 +205,6 @@ export async function generateCertificate(opts: CertificateOptions): Promise<Blo
   const logoDataUrl = await getLogoDataUrl();
   drawLogo(doc, logoDataUrl, (pageW - logoW) / 2, logoY, logoH);
 
-  // "Issued by CAPACITI"
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
-  doc.setTextColor(...MUTED);
-  doc.text("Issued by CAPACITI", pageW / 2, logoY + logoH + 5, { align: "center" });
 
   return doc.output("blob");
 }
