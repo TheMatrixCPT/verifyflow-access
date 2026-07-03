@@ -198,7 +198,7 @@ export async function generateCertificate(opts: CertificateOptions): Promise<Blo
   doc.setFont("helvetica", "normal");
   doc.setFontSize(11);
   doc.setTextColor(...NAVY);
-  doc.text(`Date: ${assessmentDate}`, anchorX, 189, { align: "center" });
+  doc.text(`Date: ${assessmentDate}`, anchorX, 182, { align: "center" });
 
   return doc.output("blob");
 }
