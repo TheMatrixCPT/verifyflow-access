@@ -2,9 +2,24 @@ import jsPDF from "jspdf";
 import { format } from "date-fns";
 import type { Respondent } from "./assessmentParser";
 import capacitiLogoUrl from "@/assets/capaciti-logo.png";
+import certificateTemplate from "@/assets/certificate-template.png.asset.json";
 
 // Logo aspect ratio (width / height) for the trimmed CAPACITI mark.
 const LOGO_ASPECT = 1299 / 277;
+
+let _certTemplateDataUrl: string | null = null;
+async function getCertificateTemplateDataUrl(): Promise<string> {
+  if (_certTemplateDataUrl) return _certTemplateDataUrl;
+  const res = await fetch(certificateTemplate.url);
+  const blob = await res.blob();
+  _certTemplateDataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+  return _certTemplateDataUrl;
+}
 
 let _logoDataUrl: string | null = null;
 async function getLogoDataUrl(): Promise<string> {
