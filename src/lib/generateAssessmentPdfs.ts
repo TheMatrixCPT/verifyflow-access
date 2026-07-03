@@ -81,99 +81,132 @@ function drawCapacitiMark(doc: jsPDF, x: number, y: number, scale = 1) {
 }
 
 /**
- * Draw a corner "blob" cluster — overlapping red and purple ovals like the template.
- * `corner` chooses which corner to render in.
+ * Draw the decorative geometric border (red diagonal stripes, purple blocks,
+ * navy accents) that frames the white certificate card.
  */
-function drawCornerBlobs(
-  doc: jsPDF,
-  pageW: number,
-  pageH: number,
-  corner: "tr" | "bl",
-) {
-  if (corner === "tr") {
-    // Top-right: large purple behind, red in front
-    doc.setFillColor(...PURPLE);
-    doc.ellipse(pageW - 8, -8, 60, 38, "F");
-    doc.setFillColor(...CORAL);
-    doc.ellipse(pageW - 35, -2, 55, 32, "F");
-  } else {
-    // Bottom-left: large red behind, purple in front
-    doc.setFillColor(...CORAL);
-    doc.ellipse(0, pageH + 4, 55, 32, "F");
-    doc.setFillColor(...PURPLE);
-    doc.ellipse(28, pageH + 4, 50, 30, "F");
-  }
-}
-
-/** Generate an A4 PORTRAIT certificate PDF that mirrors the CAPACITI template. */
-export async function generateCertificate(opts: CertificateOptions): Promise<Blob> {
-  const { respondent, assessmentTitle, assessmentDate } = opts;
-  const doc = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
-  const pageW = doc.internal.pageSize.getWidth();   // 210
-  const pageH = doc.internal.pageSize.getHeight();  // 297
-
-  // White background (already default but explicit for safety)
+function drawCertificateFrame(doc: jsPDF, pageW: number, pageH: number) {
+  // Base: white
   doc.setFillColor(255, 255, 255);
   doc.rect(0, 0, pageW, pageH, "F");
 
-  // Decorative blob clusters
-  drawCornerBlobs(doc, pageW, pageH, "tr");
-  drawCornerBlobs(doc, pageW, pageH, "bl");
+  // --- Top-left: navy triangle backdrop + red diagonal stripes ---
+  doc.setFillColor(...NAVY);
+  // Large navy triangle behind the red stripes
+  doc.triangle(0, 0, 110, 0, 0, 90, "F");
 
-  // Title — "CERTIFICATE OF COMPLETION" (serif, navy, two lines, centered)
-  doc.setFont("times", "bold");
-  doc.setTextColor(...NAVY);
-  doc.setFontSize(48);
-  doc.text("CERTIFICATE", pageW / 2, 78, { align: "center" });
-  doc.text("OF COMPLETION", pageW / 2, 100, { align: "center" });
-
-  // Eyebrow
-  doc.setFont("times", "normal");
-  doc.setTextColor(...NAVY);
-  doc.setFontSize(13);
-  doc.text("This certificate is presented to", pageW / 2, 122, { align: "center" });
-
-  // Recipient name (UPPERCASE serif bold)
-  doc.setFont("times", "bold");
-  doc.setTextColor(...NAVY);
-  doc.setFontSize(28);
-  doc.text(respondent.name.toUpperCase(), pageW / 2, 142, { align: "center" });
-
-  // Diamond divider line
-  const divY = 152;
-  const divHalf = 60;
-  doc.setDrawColor(...NAVY);
-  doc.setLineWidth(0.6);
-  doc.line(pageW / 2 - divHalf + 4, divY, pageW / 2 + divHalf - 4, divY);
-  // diamonds at each end
-  const drawDiamond = (cx: number, cy: number, s: number) => {
-    doc.setFillColor(...NAVY);
-    doc.triangle(cx - s, cy, cx, cy - s, cx + s, cy, "F");
-    doc.triangle(cx - s, cy, cx, cy + s, cx + s, cy, "F");
+  doc.setFillColor(...CORAL);
+  // Diagonal parallelogram stripes running from top-edge down to left-edge.
+  // Each stripe defined by 4 points (top-left, top-right, bottom-right, bottom-left).
+  const stripe = (p1: [number, number], p2: [number, number], p3: [number, number], p4: [number, number]) => {
+    doc.lines(
+      [
+        [p2[0] - p1[0], p2[1] - p1[1]],
+        [p3[0] - p2[0], p3[1] - p2[1]],
+        [p4[0] - p3[0], p4[1] - p3[1]],
+      ],
+      p1[0],
+      p1[1],
+      [1, 1],
+      "F",
+      true,
+    );
   };
-  drawDiamond(pageW / 2 - divHalf, divY, 1.8);
-  drawDiamond(pageW / 2 + divHalf, divY, 1.8);
+  // Stripe A
+  stripe([30, 0], [60, 0], [0, 60], [0, 30]);
+  // Stripe B (thinner, offset)
+  stripe([75, 0], [90, 0], [0, 90], [0, 75]);
 
-  // "has successfully completed the assessment for"
-  doc.setFont("times", "normal");
+  // --- Top-right: purple block with navy inset ---
+  doc.setFillColor(...PURPLE);
+  doc.rect(pageW - 95, 0, 95, 55, "F");
+  doc.setFillColor(...NAVY);
+  doc.rect(pageW - 55, 0, 55, 22, "F");
+
+  // --- Right edge: navy vertical band + purple stripe ---
+  doc.setFillColor(...NAVY);
+  doc.rect(pageW - 18, 0, 18, pageH, "F");
+  doc.setFillColor(...PURPLE);
+  doc.rect(pageW - 40, 60, 22, 55, "F");
+
+  // --- Bottom-right: purple large block ---
+  doc.setFillColor(...PURPLE);
+  doc.rect(pageW - 110, pageH - 55, 110, 55, "F");
+  doc.setFillColor(...NAVY);
+  doc.rect(pageW - 65, pageH - 30, 30, 30, "F");
+
+  // --- Bottom-left: small navy accent ---
+  doc.setFillColor(...NAVY);
+  doc.rect(0, pageH - 20, 60, 20, "F");
+  doc.setFillColor(...CORAL);
+  doc.rect(15, pageH - 20, 20, 20, "F");
+
+  // --- White inner card (with a subtle shadow-like offset) ---
+  doc.setFillColor(255, 255, 255);
+  doc.rect(20, 18, pageW - 55, pageH - 42, "F");
+}
+
+/** Generate an A4 LANDSCAPE certificate PDF that mirrors the CAPACITI template. */
+export async function generateCertificate(opts: CertificateOptions): Promise<Blob> {
+  const { respondent, assessmentTitle, assessmentDate } = opts;
+  const doc = new jsPDF({ unit: "mm", format: "a4", orientation: "landscape" });
+  const pageW = doc.internal.pageSize.getWidth();   // 297
+  const pageH = doc.internal.pageSize.getHeight();  // 210
+
+  // Decorative frame + white card
+  drawCertificateFrame(doc, pageW, pageH);
+
+  // Card bounds
+  const cardX = 20;
+  const cardW = pageW - 55;
+  const centerX = cardX + cardW / 2;
+
+  // CAPACITI logo centered near top of card
+  const logoH = 14;
+  const logoW = logoH * LOGO_ASPECT;
+  const logoY = 26;
+  const logoDataUrl = await getLogoDataUrl();
+  drawLogo(doc, logoDataUrl, centerX - logoW / 2, logoY, logoH);
+
+  // "CERTIFICATE" — bold sans-serif, navy, huge
+  doc.setFont("helvetica", "bold");
   doc.setTextColor(...NAVY);
-  doc.setFontSize(13);
-  doc.text("has successfully completed the assessment for", pageW / 2, 172, { align: "center" });
+  doc.setFontSize(52);
+  doc.text("CERTIFICATE", centerX, 72, { align: "center" });
 
-  // Assessment title (serif bold)
+  // "OF COMPLETION" — smaller
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(22);
+  doc.text("OF COMPLETION", centerX, 87, { align: "center" });
+
+  // "This certificate is proudly presented to:"
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(14);
+  doc.setTextColor(...NAVY);
+  doc.text("This certificate is proudly presented to:", centerX, 105, { align: "center" });
+
+  // Recipient name — serif bold, navy
   doc.setFont("times", "bold");
+  doc.setFontSize(34);
   doc.setTextColor(...NAVY);
-  doc.setFontSize(20);
-  const titleLines = doc.splitTextToSize(assessmentTitle, pageW - 60);
-  doc.text(titleLines, pageW / 2, 188, { align: "center" });
+  doc.text(respondent.name, centerX, 128, { align: "center" });
 
-  // "Achieving a score of"
-  doc.setFont("times", "normal");
-  doc.setTextColor(...NAVY);
+  // Purple underline beneath name
+  doc.setDrawColor(...PURPLE);
+  doc.setLineWidth(0.6);
+  doc.line(centerX - 70, 134, centerX + 70, 134);
+
+  // "for achieving a score of {title}"
+  doc.setFont("helvetica", "normal");
   doc.setFontSize(13);
-  doc.text("Achieving a score of", pageW / 2, 215, { align: "center" });
+  doc.setTextColor(...NAVY);
+  const introLines = doc.splitTextToSize(
+    `for achieving a score of ${assessmentTitle ? "on " + assessmentTitle : ""}`.trim(),
+    cardW - 40,
+  );
+  // Keep the primary phrase clean when there's no assessment title
+  doc.text(assessmentTitle ? introLines : ["for achieving a score of"], centerX, 152, { align: "center" });
 
-  // Score (coral, large)
+  // Score — serif bold navy, large
   const scoreText =
     respondent.percent !== null
       ? respondent.rawScore !== null && respondent.totalPossible !== null
@@ -183,28 +216,20 @@ export async function generateCertificate(opts: CertificateOptions): Promise<Blo
         ? `${respondent.rawScore}`
         : "—";
   doc.setFont("times", "bold");
-  doc.setTextColor(...CORAL);
   doc.setFontSize(26);
-  doc.text(scoreText, pageW / 2, 230, { align: "center" });
+  doc.setTextColor(...NAVY);
+  doc.text(scoreText, centerX, 170, { align: "center" });
 
-  // Underline beneath score
-  doc.setDrawColor(...NAVY);
-  doc.setLineWidth(0.5);
-  doc.line(pageW / 2 - 50, 235, pageW / 2 + 50, 235);
+  // Purple underline beneath score
+  doc.setDrawColor(...PURPLE);
+  doc.setLineWidth(0.6);
+  doc.line(centerX - 55, 175, centerX + 55, 175);
 
   // Date
-  doc.setFont("times", "normal");
-  doc.setTextColor(...MUTED);
+  doc.setFont("helvetica", "normal");
   doc.setFontSize(11);
-  doc.text(`Date: ${assessmentDate}`, pageW / 2, 244, { align: "center" });
-
-  // CAPACITI logo centered near bottom
-  const logoH = 16;
-  const logoW = logoH * LOGO_ASPECT;
-  const logoY = 262;
-  const logoDataUrl = await getLogoDataUrl();
-  drawLogo(doc, logoDataUrl, (pageW - logoW) / 2, logoY, logoH);
-
+  doc.setTextColor(...MUTED);
+  doc.text(`Date: ${assessmentDate}`, centerX, 185, { align: "center" });
 
   return doc.output("blob");
 }
