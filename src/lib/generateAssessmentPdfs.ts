@@ -195,16 +195,12 @@ export async function generateCertificate(opts: CertificateOptions): Promise<Blo
   doc.setLineWidth(0.6);
   doc.line(centerX - 70, 134, centerX + 70, 134);
 
-  // "for achieving a score of {title}"
+  // "for achieving a score of"
   doc.setFont("helvetica", "normal");
   doc.setFontSize(13);
   doc.setTextColor(...NAVY);
-  const introLines = doc.splitTextToSize(
-    `for achieving a score of ${assessmentTitle ? "on " + assessmentTitle : ""}`.trim(),
-    cardW - 40,
-  );
-  // Keep the primary phrase clean when there's no assessment title
-  doc.text(assessmentTitle ? introLines : ["for achieving a score of"], centerX, 152, { align: "center" });
+  doc.text("for achieving a score of", centerX, 152, { align: "center" });
+
 
   // Score — serif bold navy, large
   const scoreText =
