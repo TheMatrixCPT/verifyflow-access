@@ -175,72 +175,44 @@ export async function generateCertificate(opts: CertificateOptions): Promise<Blo
   const cardW = pageW - 55;
   const centerX = cardX + cardW / 2;
 
-  // CAPACITI logo centered near top of card
-  const logoH = 14;
-  const logoW = logoH * LOGO_ASPECT;
-  const logoY = 26;
-  const logoDataUrl = await getLogoDataUrl();
-  drawLogo(doc, logoDataUrl, centerX - logoW / 2, logoY, logoH);
+/** Generate an A4 LANDSCAPE certificate PDF using the exact CAPACITI template as background. */
+export async function generateCertificate(opts: CertificateOptions): Promise<Blob> {
+  const { respondent, assessmentDate } = opts;
+  const doc = new jsPDF({ unit: "mm", format: "a4", orientation: "landscape" });
+  const pageW = doc.internal.pageSize.getWidth();   // 297
+  const pageH = doc.internal.pageSize.getHeight();  // 210
 
-  // "CERTIFICATE" — bold sans-serif, navy, huge
+  // Use the exact template artwork as the full-page background.
+  const templateDataUrl = await getCertificateTemplateDataUrl();
+  doc.addImage(templateDataUrl, "PNG", 0, 0, pageW, pageH, undefined, "FAST");
+
+  // Text overlay anchor — matches the horizontal center of the template's white card.
+  // Template image is 2000x1414 mapped to 297x210mm; card content is centered around x=1005px ≈ 149.24mm.
+  const anchorX = 149.24;
+
+  // Recipient name — bold sans-serif, navy — placed above the purple underline in the template.
   doc.setFont("helvetica", "bold");
+  doc.setFontSize(40);
   doc.setTextColor(...NAVY);
-  doc.setFontSize(52);
-  doc.text("CERTIFICATE", centerX, 72, { align: "center" });
+  doc.text(respondent.name, anchorX, 118, { align: "center" });
 
-  // "OF COMPLETION" — smaller
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(22);
-  doc.text("OF COMPLETION", centerX, 87, { align: "center" });
-
-  // "This certificate is proudly presented to:"
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(14);
-  doc.setTextColor(...NAVY);
-  doc.text("This certificate is proudly presented to:", centerX, 105, { align: "center" });
-
-  // Recipient name — serif bold, navy
-  doc.setFont("times", "bold");
-  doc.setFontSize(34);
-  doc.setTextColor(...NAVY);
-  doc.text(respondent.name, centerX, 128, { align: "center" });
-
-  // Purple underline beneath name
-  doc.setDrawColor(...PURPLE);
-  doc.setLineWidth(0.6);
-  doc.line(centerX - 70, 134, centerX + 70, 134);
-
-  // "for achieving a score of"
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(13);
-  doc.setTextColor(...NAVY);
-  doc.text("for achieving a score of", centerX, 152, { align: "center" });
-
-
-  // Score — serif bold navy, large
+  // Score — bold serif, navy — placed above the second purple underline in the template.
   const scoreText =
     respondent.percent !== null
-      ? respondent.rawScore !== null && respondent.totalPossible !== null
-        ? `${respondent.rawScore} / ${respondent.totalPossible}  (${respondent.percent.toFixed(2)}%)`
-        : `${respondent.percent.toFixed(2)}%`
+      ? `${respondent.percent.toFixed(0)}%`
       : respondent.rawScore !== null
         ? `${respondent.rawScore}`
         : "—";
   doc.setFont("times", "bold");
-  doc.setFontSize(26);
+  doc.setFontSize(32);
   doc.setTextColor(...NAVY);
-  doc.text(scoreText, centerX, 170, { align: "center" });
+  doc.text(scoreText, anchorX, 164, { align: "center" });
 
-  // Purple underline beneath score
-  doc.setDrawColor(...PURPLE);
-  doc.setLineWidth(0.6);
-  doc.line(centerX - 55, 175, centerX + 55, 175);
-
-  // Date
+  // Date — placed where the template shows "Date:".
   doc.setFont("helvetica", "normal");
   doc.setFontSize(11);
-  doc.setTextColor(...MUTED);
-  doc.text(`Date: ${assessmentDate}`, centerX, 185, { align: "center" });
+  doc.setTextColor(...NAVY);
+  doc.text(`Date: ${assessmentDate}`, anchorX, 189, { align: "center" });
 
   return doc.output("blob");
 }
