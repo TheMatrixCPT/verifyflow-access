@@ -173,16 +173,33 @@ export async function generateCertificate(opts: CertificateOptions): Promise<Blo
   doc.addImage(templateDataUrl, "PNG", 0, 0, pageW, pageH, undefined, "FAST");
 
   // Text overlay anchor — matches the horizontal center of the template's white card.
-  // Template image is 2000x1414 mapped to 297x210mm; card content is centered around x=1005px ≈ 149.24mm.
+  // Template (2000x1414 px → 297x210 mm): card center ≈ 149.24 mm.
+  // Pre-printed elements to avoid:
+  //   • Upper purple underline at y ≈ 123.4 mm, x 75–222 mm  (name slot)
+  //   • Lower purple underline at y ≈ 164.0 mm, x ≈ 101–198 mm (score slot)
+  //   • Bottom purple band starts at y ≈ 191 mm
   const anchorX = 149.24;
+  const NAME_MAX_W = 140;   // keep inside upper line (147 mm) with breathing room
+  const SCORE_MAX_W = 90;   // keep inside lower line (~97 mm)
 
-  // Recipient name — bold sans-serif, navy — placed above the purple underline in the template.
+  // Auto-shrink helper so long names/scores never overflow the underline slot.
+  const fitFontSize = (text: string, startSize: number, maxWidthMm: number, minSize = 14) => {
+    let size = startSize;
+    doc.setFontSize(size);
+    while (doc.getTextWidth(text) > maxWidthMm && size > minSize) {
+      size -= 1;
+      doc.setFontSize(size);
+    }
+    return size;
+  };
+
+  // Recipient name — sits ABOVE the upper purple underline (line at y=123.4).
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(40);
   doc.setTextColor(...NAVY);
-  doc.text(respondent.name, anchorX, 118, { align: "center" });
+  fitFontSize(respondent.name, 40, NAME_MAX_W);
+  doc.text(respondent.name, anchorX, 119, { align: "center", baseline: "alphabetic" });
 
-  // Score — bold serif, navy — placed above the second purple underline in the template.
+  // Score — sits ABOVE the lower purple underline (line at y=164).
   const scoreText =
     respondent.percent !== null
       ? `${respondent.percent.toFixed(0)}%`
@@ -190,15 +207,15 @@ export async function generateCertificate(opts: CertificateOptions): Promise<Blo
         ? `${respondent.rawScore}`
         : "—";
   doc.setFont("times", "bold");
-  doc.setFontSize(32);
   doc.setTextColor(...NAVY);
-  doc.text(scoreText, anchorX, 164, { align: "center" });
+  fitFontSize(scoreText, 32, SCORE_MAX_W);
+  doc.text(scoreText, anchorX, 161, { align: "center", baseline: "alphabetic" });
 
-  // Date — placed where the template shows "Date:".
+  // Date — sits BELOW the lower underline, above the bottom purple band (starts at y≈191).
   doc.setFont("helvetica", "normal");
   doc.setFontSize(11);
   doc.setTextColor(...NAVY);
-  doc.text(`Date: ${assessmentDate}`, anchorX, 182, { align: "center" });
+  doc.text(`Date: ${assessmentDate}`, anchorX, 178, { align: "center", baseline: "alphabetic" });
 
   return doc.output("blob");
 }
