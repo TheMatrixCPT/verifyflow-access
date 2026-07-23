@@ -163,7 +163,7 @@ function drawCertificateFrame(doc: jsPDF, pageW: number, pageH: number) {
 
 /** Generate an A4 LANDSCAPE certificate PDF using the exact CAPACITI template as background. */
 export async function generateCertificate(opts: CertificateOptions): Promise<Blob> {
-  const { respondent, assessmentDate } = opts;
+  const { respondent, assessmentTitle, assessmentDate } = opts;
   const doc = new jsPDF({ unit: "mm", format: "a4", orientation: "landscape" });
   const pageW = doc.internal.pageSize.getWidth();   // 297
   const pageH = doc.internal.pageSize.getHeight();  // 210
