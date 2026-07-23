@@ -199,17 +199,13 @@ export async function generateCertificate(opts: CertificateOptions): Promise<Blo
   fitFontSize(respondent.name, 40, NAME_MAX_W);
   doc.text(respondent.name, anchorX, 119, { align: "center", baseline: "alphabetic" });
 
-  // Assessment title — sits between the name underline (y=123.4) and the score slot (y=161).
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
-  doc.setTextColor(...MUTED);
-  doc.text("for successfully completing", anchorX, 134, { align: "center", baseline: "alphabetic" });
-
+  // Assessment title — sits just below the name underline (y=123.4)
+  // and above the template's pre-printed "for achieving a score of" line (~y=145).
   doc.setFont("helvetica", "bolditalic");
   doc.setTextColor(...NAVY);
   const ASSESSMENT_MAX_W = 170;
-  fitFontSize(assessmentTitle, 18, ASSESSMENT_MAX_W, 11);
-  doc.text(assessmentTitle, anchorX, 143, { align: "center", baseline: "alphabetic" });
+  fitFontSize(assessmentTitle, 15, ASSESSMENT_MAX_W, 10);
+  doc.text(assessmentTitle, anchorX, 133, { align: "center", baseline: "alphabetic" });
 
   // Score — sits ABOVE the lower purple underline (line at y=164).
   const scoreText =
