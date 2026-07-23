@@ -163,7 +163,7 @@ function drawCertificateFrame(doc: jsPDF, pageW: number, pageH: number) {
 
 /** Generate an A4 LANDSCAPE certificate PDF using the exact CAPACITI template as background. */
 export async function generateCertificate(opts: CertificateOptions): Promise<Blob> {
-  const { respondent, assessmentDate } = opts;
+  const { respondent, assessmentTitle, assessmentDate } = opts;
   const doc = new jsPDF({ unit: "mm", format: "a4", orientation: "landscape" });
   const pageW = doc.internal.pageSize.getWidth();   // 297
   const pageH = doc.internal.pageSize.getHeight();  // 210
@@ -198,6 +198,18 @@ export async function generateCertificate(opts: CertificateOptions): Promise<Blo
   doc.setTextColor(...NAVY);
   fitFontSize(respondent.name, 40, NAME_MAX_W);
   doc.text(respondent.name, anchorX, 119, { align: "center", baseline: "alphabetic" });
+
+  // Assessment title — sits between the name underline (y=123.4) and the score slot (y=161).
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(...MUTED);
+  doc.text("for successfully completing", anchorX, 134, { align: "center", baseline: "alphabetic" });
+
+  doc.setFont("helvetica", "bolditalic");
+  doc.setTextColor(...NAVY);
+  const ASSESSMENT_MAX_W = 170;
+  fitFontSize(assessmentTitle, 18, ASSESSMENT_MAX_W, 11);
+  doc.text(assessmentTitle, anchorX, 143, { align: "center", baseline: "alphabetic" });
 
   // Score — sits ABOVE the lower purple underline (line at y=164).
   const scoreText =
