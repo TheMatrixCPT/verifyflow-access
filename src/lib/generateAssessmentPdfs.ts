@@ -199,13 +199,28 @@ export async function generateCertificate(opts: CertificateOptions): Promise<Blo
   fitFontSize(respondent.name, 40, NAME_MAX_W);
   doc.text(respondent.name, anchorX, 119, { align: "center", baseline: "alphabetic" });
 
-  // Assessment title — sits just below the name underline (y=123.4)
+  // "for successfully completing" — sits between the name and the assessment title.
+  doc.setFont("helvetica", "italic");
+  doc.setFontSize(12);
+  doc.setTextColor(...NAVY);
+  doc.text("for successfully completing", anchorX, 126, { align: "center", baseline: "alphabetic" });
+
+  // Assessment title — sits below the "for successfully completing" line
   // and above the template's pre-printed "for achieving a score of" line (~y=145).
   doc.setFont("helvetica", "bolditalic");
   doc.setTextColor(...NAVY);
   const ASSESSMENT_MAX_W = 170;
   fitFontSize(assessmentTitle, 15, ASSESSMENT_MAX_W, 10);
   doc.text(assessmentTitle, anchorX, 133, { align: "center", baseline: "alphabetic" });
+
+  // Replace the pre-printed "for achieving a score of" wording with "and for achieving a score of".
+  // A small white strip hides the original text while keeping the surrounding artwork intact.
+  doc.setFillColor(255, 255, 255);
+  doc.rect(90, 142, 117, 6, "F");
+  doc.setFont("helvetica", "italic");
+  doc.setFontSize(12);
+  doc.setTextColor(...NAVY);
+  doc.text("and for achieving a score of", anchorX, 145, { align: "center", baseline: "alphabetic" });
 
   // Score — sits ABOVE the lower purple underline (line at y=164).
   const scoreText =
