@@ -332,7 +332,14 @@ Recognised suffixes per type:
   Qualification Matric → _Matric or _Qualification
   Tax Certificate → _Tax number
 
-═══ 1. CERTIFIED ID ═══
+VALIDATION SCOPE (IMPORTANT — this programme runs a REDUCED validation set):
+Only THREE document types undergo full QA and may FAIL:
+  1. Certified ID
+  2. EEA1 Form
+  3. Beneficiary Agreement
+EVERY other document type is INFORMATIONAL ONLY: emit exactly ONE check, prefixed "Optional - ", with status pass or warning — NEVER fail, and NEVER add entries to "issues". Still classify the document correctly and still extract all readable information.
+
+═══ 1. CERTIFIED ID (full QA) ═══
 Required checks:
 - Image clarity: Is the image clear and not blurry?
 - ID number readable: 13-digit SA ID number visible and legible
@@ -345,19 +352,7 @@ Required checks:
 - Barcode visible (if it is a card-type ID — barcode should be visible on the back). For book IDs this is N/A — emit as "Optional - Barcode visibility" warning.
 - Extract: stamp_date, police_station, certification_authority.
 
-═══ 2. UNEMPLOYMENT AFFIDAVIT ═══
-Required checks:
-- Candidate full name and surname filled in
-- Candidate 13-digit ID number filled in
-- Date filled in (sworn/signed date)
-- All other required fields completed (no blanks)
-- Candidate signature present
-- Certification stamp present, signed and dated by Commissioner of Oaths / Police
-- Stamp date within the last ${stampValidityMonths} months
-- Sworn/signed date corresponds to the certification stamp date (same day or within a few days). Mismatch → fail.
-- Follows the standard Capaciti Unemployment Skills Training Affidavit template (V100595).
-
-═══ 3. EEA1 FORM (Department of Labour) ═══
+═══ 2. EEA1 FORM (Department of Labour) (full QA) ═══
 Required checks:
 - Race marked properly (single clear selection) — extract into extracted_info.race
 - Gender marked properly
@@ -370,29 +365,7 @@ Required checks:
   → If Yes and no acquired/residence/permit date → fail
 - Employment number: NOT required — emit "Optional - Employment number" pass/info regardless of whether it is filled.
 
-═══ 4. PWDS CONFIRMATION OF DISABILITY ═══
-Required checks:
-- Type of disability is stated
-- Disability confirmed by a relevant SPECIALIST medical doctor (not a generic GP note)
-- Specialist signed AND dated the document
-- Doctor's official stamp present
-- Doctor's contact information completed (practice address / phone)
-- HPCSA registration: 
-    • If PRIVATE practice doctor → BOTH HPCSA practice number AND HPCSA personal registration number must be present
-    • If PUBLIC clinic / hospital doctor → HPCSA personal registration number must be present (practice number not required)
-- All required fields on the form completed by the doctor
-- Follows Capaciti Doctors Disability Certificate template (V100591) where applicable, but do NOT fail purely on layout if all clinical info is present.
-
-═══ 5. SOCIAL MEDIA CONSENT (Naspers Labs Letterhead template) ═══
-Required checks:
-- Page 1 completed by candidate (personal details filled)
-- Page 2: Graduate / Beneficiary signature AND date present
-- Page 2: Graduate / Beneficiary printed name present
-- Host partner / Delivery partner signature section: blank is ACCEPTABLE → emit "Optional - Host partner signature" warning if blank, pass if filled
-- Page 4: blank is ACCEPTABLE → emit "Optional - Page 4" pass/info
-- Inspect ALL pages before deciding a signature is missing.
-
-═══ 6. BENEFICIARY AGREEMENT (BA) ═══
+═══ 3. BENEFICIARY AGREEMENT (BA) (full QA) ═══
 Required checks:
 - Front page: candidate name, surname, AND 13-digit ID number filled in
 - ID number matches the candidate's ID document (only if cross-reference context above is available)
@@ -404,87 +377,18 @@ Required checks:
 - All annexures present (the BA should be complete, not partial)
 - Inspect ALL pages of this multi-page document before reporting anything as missing.
 
-═══ 7. OFFER / EMPLOYMENT LETTER ═══
-Required checks:
-- Company letterhead OR clear company contact details present
-- Candidate full name and surname present
-- Role / job title clearly stated
-- Salary amount stated
-- Signed by HR representative or Company Executive
-- Dated by signatory.
+═══ ALL OTHER DOCUMENT TYPES — VALIDATION DISABLED (informational only) ═══
+This applies to: Unemployment Affidavit, TCX Unemployment Affidavit, Employment Contract FTC, PWDS Confirmation of Disability, Social Media Consent, Offer Letter, Certificate of Completion, Bank Letter (incl. Proof of Address / Proof of Residence), CV, Capaciti Declaration, Qualification / Matric, Tax Certificate, and "Other".
 
-═══ 8. EMPLOYMENT CONTRACT / FTC ═══
-Required checks:
-- Front cover: candidate name, surname, AND 13-digit ID number
-- All annexures present (complete contract)
-- Initialled on EVERY page (aggregate into one check "Initials on every page")
-- Page 10: candidate signature AND employer signature present
-- Page 11 (Schedule 1): all fields filled / completed
-- Page 12: signed AND dated
-- Signed and dated by BOTH employer and employee on the relevant signature pages
-- ID number matches the candidate's ID document (only if cross-reference context above is available)
-- Inspect ALL pages before deciding anything is missing.
+For these types:
+- Do NOT run the detailed compliance checklist. Detailed QA for these types is temporarily switched off.
+- Emit exactly ONE check named "Optional - Document received and readable" with status "pass" if the document is legible and identifiable, or "warning" if it is unreadable/illegible. NEVER "fail".
+- validation_status must be "pass" (or "warning" only when the document is unreadable) — never "fail".
+- Leave "issues" empty for these types.
+- Still extract ALL readable information (names, ID numbers, dates, stamps, signatures) into extracted_info.
+- Do NOT flag missing signatures, missing stamps, expired stamps, blank fields, template mismatches, or ID mismatches for these types.
+- Still classify correctly: if the filename or readable contents clearly indicate a known supporting document (MIE verification, course/training completion, qualification evidence, CV, bank letter, tax certificate, affidavit, contract, etc.), choose that specific document_type instead of "Other".
 
-═══ 9. CERTIFICATE OF COMPLETION ═══
-Required checks:
-- Certificate or letter confirms a course, training programme, learnership, or the expected programme outcomes were achieved
-- Candidate full name and surname present
-- Signed by the Programme Manager OR Executive of the Implementing Partner (IP)
-- Dated by the signatory.
-
-═══ 10. BANK LETTER (no Naspers QA — informational only) ═══
-ALL checks for this type must be prefixed "Optional - " and use status pass/warning only — NEVER fail.
-Required checks:
-- Optional - Valid South African bank: bank name should be one of ABSA, Standard Bank, FNB / First National Bank, Nedbank, Capitec, Investec, African Bank, TymeBank, Discovery Bank, Bidvest, Sasfin, Bank Zero, Access Bank. Warning if unrecognised.
-- Optional - Account number present and looks valid (numeric, 9–11 digits typical)
-- Optional - Account holder identifier matches candidate (name/surname/ID where present).
-
-═══ 11. TCX UNEMPLOYMENT AFFIDAVIT (undergoes QA) ═══
-Required checks:
-- Candidate full name as per ID — first name, second name (if any), AND surname all present and matching the ID document where cross-reference is available
-- 13-digit ID number filled in
-- All form fields completed (no blanks)
-- Question 1 circled / marked "NO"
-- Question 2 circled / marked "NO"
-- Candidate signature present
-- Date filled in by candidate
-- Certification stamp present, signed AND dated by Commissioner of Oaths / Police
-- Sworn/signed date corresponds to the certification stamp date
-- Stamp date within the last ${stampValidityMonths} months.
-
-═══ 12. CV (informational only — no QA) ═══
-ALL checks prefixed "Optional - " — never fail.
-- Optional - Document is readable
-- Optional - Candidate name/surname present
-- Optional - Contact details present (phone or email).
-
-═══ 13. CAPACITI DECLARATION (internal use only) ═══
-Required checks:
-- Signed by candidate
-- Dated by candidate.
-
-═══ 14. QUALIFICATION / MATRIC (informational — actual MIE check is external) ═══
-ALL checks prefixed "Optional - " — never fail.
-- Optional - Document is readable
-- Optional - Institution name visible
-- Optional - Qualification / Matric title visible
-- Optional - Candidate name present.
-
-═══ 15. TAX CERTIFICATE (payroll use only — no Naspers QA) ═══
-ALL checks prefixed "Optional - " — never fail.
-- Optional - Document is readable
-- Optional - Tax / IRP5 reference number present
-- Optional - Candidate name and ID present where shown.
-
-═══ OTHER ═══
-For any document that does not match the above types:
-- Check image clarity
-- Extract all readable information
-- Verify candidate name, surname, ID number where present
-- Check for signatures, dates, stamps where contextually expected
-- Mark non-required missing stamps/certifications as "Optional - ..." warnings
-- Do NOT fail solely because of unfamiliar layout or branding.
-- If the filename or readable contents clearly indicate a known supporting document such as MIE verification, course or training completion, qualification evidence, CV, bank letter, or tax certificate, choose that specific document_type instead of "Other".
 
 INFORMATION EXTRACTION RULES:
 - You MUST extract ALL readable information into extracted_info
