@@ -1040,11 +1040,14 @@ serve(async (req) => {
       }
     }
 
-    // Sync mode with OpenRouter — run Stage A (validation) and Stage B (handwriting) in parallel
-    console.log(`Using OpenRouter (sync, model: ${aiModel}) for document analysis + handwriting pass`);
+    // Sync mode with OpenRouter — Stage A (validation) always runs.
+    // Stage B (handwriting) only runs for the types that still undergo full QA.
+    const HANDWRITING_DOC_TYPES = ["Certified ID", "EEA1 Form", "Beneficiary Agreement"];
+    const runHandwriting = !filenameHints.docTypeHint || HANDWRITING_DOC_TYPES.includes(filenameHints.docTypeHint);
+    console.log(`Using OpenRouter (sync, model: ${aiModel}); handwriting pass: ${runHandwriting ? "on" : "skipped"}`);
     const [aiResponseRes, handwritingRes] = await Promise.all([
       analyzeWithOpenRouter(OPENROUTER_API_KEY, aiModel, systemPrompt, file_url, file_name, crossReferenceContext, filenameHints),
-      analyzeHandwriting(OPENROUTER_API_KEY, file_url, file_name),
+      runHandwriting ? analyzeHandwriting(OPENROUTER_API_KEY, file_url, file_name) : Promise.resolve(null),
     ]);
     aiResponse = aiResponseRes;
     const handwriting = handwritingRes;
