@@ -1272,6 +1272,23 @@ serve(async (req) => {
       console.log(`SA ID validation for ${cleaned}: ${runIdChecks ? (idValid ? "PASS" : "FAIL") : "skipped (informational doc type)"}`);
     }
 
+    // ── Enforce reduced validation scope: only 3 doc types may fail ──
+    const QA_DOC_TYPES = ["Certified ID", "EEA1 Form", "Beneficiary Agreement"];
+    if (!QA_DOC_TYPES.includes(extracted.document_type)) {
+      extracted.checks = (extracted.checks || []).map((c: any) => {
+        if (c.status !== "fail") return c;
+        const name = String(c.name || "");
+        return {
+          ...c,
+          status: "warning",
+          name: name.startsWith("Optional - ") ? name : `Optional - ${name}`,
+        };
+      });
+      extracted.issues = [];
+      if (extracted.validation_status === "fail") {
+        extracted.validation_status = "pass";
+      }
+    }
 
     // Update document with AI results
     await supabase.from("documents").update({
