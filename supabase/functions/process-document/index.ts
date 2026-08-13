@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -469,19 +470,31 @@ function normalizeExtractedInfo(extractedInfo: Record<string, any> | null | unde
   return normalized;
 }
 
-async function fetchFileAsBase64(fileUrl: string): Promise<string> {
+// Per-request cache so the same file is fetched + encoded only once, even
+// though Stage A, Stage A2 and Stage B all need the bytes. The old
+// String.fromCharCode loop + repeated encoding was the main CPU hog that
+// triggered WORKER_RESOURCE_LIMIT / "CPU Time exceeded".
+const base64Cache = new Map<string, Promise<string>>();
+
+async function encodeFile(fileUrl: string): Promise<string> {
   const response = await fetch(fileUrl);
   if (!response.ok) throw new Error(`Failed to fetch file: ${response.status}`);
-  const arrayBuffer = await response.arrayBuffer();
-  const uint8Array = new Uint8Array(arrayBuffer);
-  let binary = '';
-  const chunkSize = 8192;
-  for (let i = 0; i < uint8Array.length; i += chunkSize) {
-    const chunk = uint8Array.subarray(i, i + chunkSize);
-    binary += String.fromCharCode(...chunk);
-  }
-  return btoa(binary);
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  return encodeBase64(bytes);
 }
+
+function fetchFileAsBase64(fileUrl: string): Promise<string> {
+  let cached = base64Cache.get(fileUrl);
+  if (!cached) {
+    cached = encodeFile(fileUrl).catch((e) => {
+      base64Cache.delete(fileUrl);
+      throw e;
+    });
+    base64Cache.set(fileUrl, cached);
+  }
+  return cached;
+}
+
 
 async function buildUserContent(fileUrl: string, fileName: string, crossReferenceContext: CrossReferenceContext, filenameHints: FilenameHints): Promise<any[]> {
   const crossReferencePrompt = crossReferenceContext.available
