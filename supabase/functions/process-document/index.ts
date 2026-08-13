@@ -400,9 +400,9 @@ INFORMATION EXTRACTION RULES:
 - Leave fields as empty string if not found — never invent information.
 
 STAMP DATE VALIDITY:
-- For Certified ID: the stamp date must be within the current programme YEAR (${today.substring(0, 4)}).
-- For all other documents that require a stamp: the stamp date must be within ${stampValidityMonths} months from today (${today}).
-- Set stamp_date_valid accordingly. If expired, add a FAIL check and include in issues.
+- For Certified ID ONLY: the stamp date must be within the current programme YEAR (${today.substring(0, 4)}). If expired, add a FAIL check and include in issues.
+- For every other document type: extract stamp_date when visible but do NOT fail or warn on stamp age (validation disabled).
+- Set stamp_date_valid accordingly.
 
 VALIDATION OUTPUT RULES:
 - For each check performed, include it in the "checks" array with name, status (pass/warning/fail), and detail
