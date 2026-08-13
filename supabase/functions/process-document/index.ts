@@ -332,7 +332,14 @@ Recognised suffixes per type:
   Qualification Matric → _Matric or _Qualification
   Tax Certificate → _Tax number
 
-═══ 1. CERTIFIED ID ═══
+VALIDATION SCOPE (IMPORTANT — this programme runs a REDUCED validation set):
+Only THREE document types undergo full QA and may FAIL:
+  1. Certified ID
+  2. EEA1 Form
+  3. Beneficiary Agreement
+EVERY other document type is INFORMATIONAL ONLY: emit exactly ONE check, prefixed "Optional - ", with status pass or warning — NEVER fail, and NEVER add entries to "issues". Still classify the document correctly and still extract all readable information.
+
+═══ 1. CERTIFIED ID (full QA) ═══
 Required checks:
 - Image clarity: Is the image clear and not blurry?
 - ID number readable: 13-digit SA ID number visible and legible
@@ -345,19 +352,7 @@ Required checks:
 - Barcode visible (if it is a card-type ID — barcode should be visible on the back). For book IDs this is N/A — emit as "Optional - Barcode visibility" warning.
 - Extract: stamp_date, police_station, certification_authority.
 
-═══ 2. UNEMPLOYMENT AFFIDAVIT ═══
-Required checks:
-- Candidate full name and surname filled in
-- Candidate 13-digit ID number filled in
-- Date filled in (sworn/signed date)
-- All other required fields completed (no blanks)
-- Candidate signature present
-- Certification stamp present, signed and dated by Commissioner of Oaths / Police
-- Stamp date within the last ${stampValidityMonths} months
-- Sworn/signed date corresponds to the certification stamp date (same day or within a few days). Mismatch → fail.
-- Follows the standard Capaciti Unemployment Skills Training Affidavit template (V100595).
-
-═══ 3. EEA1 FORM (Department of Labour) ═══
+═══ 2. EEA1 FORM (Department of Labour) (full QA) ═══
 Required checks:
 - Race marked properly (single clear selection) — extract into extracted_info.race
 - Gender marked properly
@@ -370,29 +365,7 @@ Required checks:
   → If Yes and no acquired/residence/permit date → fail
 - Employment number: NOT required — emit "Optional - Employment number" pass/info regardless of whether it is filled.
 
-═══ 4. PWDS CONFIRMATION OF DISABILITY ═══
-Required checks:
-- Type of disability is stated
-- Disability confirmed by a relevant SPECIALIST medical doctor (not a generic GP note)
-- Specialist signed AND dated the document
-- Doctor's official stamp present
-- Doctor's contact information completed (practice address / phone)
-- HPCSA registration: 
-    • If PRIVATE practice doctor → BOTH HPCSA practice number AND HPCSA personal registration number must be present
-    • If PUBLIC clinic / hospital doctor → HPCSA personal registration number must be present (practice number not required)
-- All required fields on the form completed by the doctor
-- Follows Capaciti Doctors Disability Certificate template (V100591) where applicable, but do NOT fail purely on layout if all clinical info is present.
-
-═══ 5. SOCIAL MEDIA CONSENT (Naspers Labs Letterhead template) ═══
-Required checks:
-- Page 1 completed by candidate (personal details filled)
-- Page 2: Graduate / Beneficiary signature AND date present
-- Page 2: Graduate / Beneficiary printed name present
-- Host partner / Delivery partner signature section: blank is ACCEPTABLE → emit "Optional - Host partner signature" warning if blank, pass if filled
-- Page 4: blank is ACCEPTABLE → emit "Optional - Page 4" pass/info
-- Inspect ALL pages before deciding a signature is missing.
-
-═══ 6. BENEFICIARY AGREEMENT (BA) ═══
+═══ 3. BENEFICIARY AGREEMENT (BA) (full QA) ═══
 Required checks:
 - Front page: candidate name, surname, AND 13-digit ID number filled in
 - ID number matches the candidate's ID document (only if cross-reference context above is available)
@@ -404,87 +377,18 @@ Required checks:
 - All annexures present (the BA should be complete, not partial)
 - Inspect ALL pages of this multi-page document before reporting anything as missing.
 
-═══ 7. OFFER / EMPLOYMENT LETTER ═══
-Required checks:
-- Company letterhead OR clear company contact details present
-- Candidate full name and surname present
-- Role / job title clearly stated
-- Salary amount stated
-- Signed by HR representative or Company Executive
-- Dated by signatory.
+═══ ALL OTHER DOCUMENT TYPES — VALIDATION DISABLED (informational only) ═══
+This applies to: Unemployment Affidavit, TCX Unemployment Affidavit, Employment Contract FTC, PWDS Confirmation of Disability, Social Media Consent, Offer Letter, Certificate of Completion, Bank Letter (incl. Proof of Address / Proof of Residence), CV, Capaciti Declaration, Qualification / Matric, Tax Certificate, and "Other".
 
-═══ 8. EMPLOYMENT CONTRACT / FTC ═══
-Required checks:
-- Front cover: candidate name, surname, AND 13-digit ID number
-- All annexures present (complete contract)
-- Initialled on EVERY page (aggregate into one check "Initials on every page")
-- Page 10: candidate signature AND employer signature present
-- Page 11 (Schedule 1): all fields filled / completed
-- Page 12: signed AND dated
-- Signed and dated by BOTH employer and employee on the relevant signature pages
-- ID number matches the candidate's ID document (only if cross-reference context above is available)
-- Inspect ALL pages before deciding anything is missing.
+For these types:
+- Do NOT run the detailed compliance checklist. Detailed QA for these types is temporarily switched off.
+- Emit exactly ONE check named "Optional - Document received and readable" with status "pass" if the document is legible and identifiable, or "warning" if it is unreadable/illegible. NEVER "fail".
+- validation_status must be "pass" (or "warning" only when the document is unreadable) — never "fail".
+- Leave "issues" empty for these types.
+- Still extract ALL readable information (names, ID numbers, dates, stamps, signatures) into extracted_info.
+- Do NOT flag missing signatures, missing stamps, expired stamps, blank fields, template mismatches, or ID mismatches for these types.
+- Still classify correctly: if the filename or readable contents clearly indicate a known supporting document (MIE verification, course/training completion, qualification evidence, CV, bank letter, tax certificate, affidavit, contract, etc.), choose that specific document_type instead of "Other".
 
-═══ 9. CERTIFICATE OF COMPLETION ═══
-Required checks:
-- Certificate or letter confirms a course, training programme, learnership, or the expected programme outcomes were achieved
-- Candidate full name and surname present
-- Signed by the Programme Manager OR Executive of the Implementing Partner (IP)
-- Dated by the signatory.
-
-═══ 10. BANK LETTER (no Naspers QA — informational only) ═══
-ALL checks for this type must be prefixed "Optional - " and use status pass/warning only — NEVER fail.
-Required checks:
-- Optional - Valid South African bank: bank name should be one of ABSA, Standard Bank, FNB / First National Bank, Nedbank, Capitec, Investec, African Bank, TymeBank, Discovery Bank, Bidvest, Sasfin, Bank Zero, Access Bank. Warning if unrecognised.
-- Optional - Account number present and looks valid (numeric, 9–11 digits typical)
-- Optional - Account holder identifier matches candidate (name/surname/ID where present).
-
-═══ 11. TCX UNEMPLOYMENT AFFIDAVIT (undergoes QA) ═══
-Required checks:
-- Candidate full name as per ID — first name, second name (if any), AND surname all present and matching the ID document where cross-reference is available
-- 13-digit ID number filled in
-- All form fields completed (no blanks)
-- Question 1 circled / marked "NO"
-- Question 2 circled / marked "NO"
-- Candidate signature present
-- Date filled in by candidate
-- Certification stamp present, signed AND dated by Commissioner of Oaths / Police
-- Sworn/signed date corresponds to the certification stamp date
-- Stamp date within the last ${stampValidityMonths} months.
-
-═══ 12. CV (informational only — no QA) ═══
-ALL checks prefixed "Optional - " — never fail.
-- Optional - Document is readable
-- Optional - Candidate name/surname present
-- Optional - Contact details present (phone or email).
-
-═══ 13. CAPACITI DECLARATION (internal use only) ═══
-Required checks:
-- Signed by candidate
-- Dated by candidate.
-
-═══ 14. QUALIFICATION / MATRIC (informational — actual MIE check is external) ═══
-ALL checks prefixed "Optional - " — never fail.
-- Optional - Document is readable
-- Optional - Institution name visible
-- Optional - Qualification / Matric title visible
-- Optional - Candidate name present.
-
-═══ 15. TAX CERTIFICATE (payroll use only — no Naspers QA) ═══
-ALL checks prefixed "Optional - " — never fail.
-- Optional - Document is readable
-- Optional - Tax / IRP5 reference number present
-- Optional - Candidate name and ID present where shown.
-
-═══ OTHER ═══
-For any document that does not match the above types:
-- Check image clarity
-- Extract all readable information
-- Verify candidate name, surname, ID number where present
-- Check for signatures, dates, stamps where contextually expected
-- Mark non-required missing stamps/certifications as "Optional - ..." warnings
-- Do NOT fail solely because of unfamiliar layout or branding.
-- If the filename or readable contents clearly indicate a known supporting document such as MIE verification, course or training completion, qualification evidence, CV, bank letter, or tax certificate, choose that specific document_type instead of "Other".
 
 INFORMATION EXTRACTION RULES:
 - You MUST extract ALL readable information into extracted_info
@@ -496,9 +400,9 @@ INFORMATION EXTRACTION RULES:
 - Leave fields as empty string if not found — never invent information.
 
 STAMP DATE VALIDITY:
-- For Certified ID: the stamp date must be within the current programme YEAR (${today.substring(0, 4)}).
-- For all other documents that require a stamp: the stamp date must be within ${stampValidityMonths} months from today (${today}).
-- Set stamp_date_valid accordingly. If expired, add a FAIL check and include in issues.
+- For Certified ID ONLY: the stamp date must be within the current programme YEAR (${today.substring(0, 4)}). If expired, add a FAIL check and include in issues.
+- For every other document type: extract stamp_date when visible but do NOT fail or warn on stamp age (validation disabled).
+- Set stamp_date_valid accordingly.
 
 VALIDATION OUTPUT RULES:
 - For each check performed, include it in the "checks" array with name, status (pass/warning/fail), and detail
@@ -592,7 +496,7 @@ async function buildUserContent(fileUrl: string, fileName: string, crossReferenc
     ? `FILENAME HINTS (authoritative for identification — admin-named): The filename suggests ${filenameHintParts.join(", ")}. Use these as your primary signal for candidate_name, extracted_id_number, and document_type. Confirm them against the actual document content; if the document content clearly contradicts the filename, still extract what the document says but flag the mismatch in your summary. Filename wins on conflict for candidate identification.`
     : `FILENAME HINTS: Could not parse a recognised pattern from "${fileName}". Identify the candidate and document type from content alone.`;
 
-  const textPrompt = `Analyze this document and validate it thoroughly. Filename: "${fileName}". ${filenamePrompt} ${crossReferencePrompt} Check all pages before deciding anything is missing. Do not stop at the first pages of a multi-page document. Read pen marks, ticks, handwritten selections, and check boxes carefully because they contain important answers. Many forms are filled in by hand — transcribe handwritten names, IDs, dates and signatures with the same care as printed text. Handwriting will appear in many styles (block print, lowercase print, cursive, joined or stylized, slanted, neat or messy, in pen/pencil/marker of any colour) — interpret the intended characters regardless of style. Treat signatures and initials as PRESENT whenever any deliberate handwritten ink mark sits in the signature/initials area, even if the mark is a stylized scribble, monogram, single stroke, or otherwise unreadable; only mark them missing when the area is clearly empty. Remember to extract stamp dates, police station names, and certification authority details even when stamps overlap words. For employment equity forms, treat the nationality answer as Yes or No: No means South African, Yes means foreign national. If foreign national is marked yes, extract the acquired date of nationality, residence date, or permit-related date into extracted_info.foreign_national_support_date. For contracts, page 10 employee details is an information page and does not require employee or employer signatures. Some contracts require only the employee signature while others require both employee and employer signatures, so decide from the actual signature blocks and wording on the relevant signature page. For disability and proof-of-address documents, do not require Capaciti formatting if the core identifying information and stamps/signatures are present. If the filename or readable contents clearly indicate MIE verification, a course or training completion certificate, or another listed supporting document type, classify it using that specific document_type instead of "Other". CHOOSE "Other" ONLY AS A LAST RESORT. Before picking "Other", scan the document for: (a) form codes such as EEA1, TCX, IRP5, BA; (b) letterheads (SARS, SAPS, banks, municipalities, training providers); (c) titles like "Affidavit", "Bank Letter", "Proof of Address", "Proof of Residence", "Curriculum Vitae", "Certificate of Completion", "Matric Certificate", "Senior Certificate"; (d) signatory blocks ("Commissioner of Oaths"). A "Proof of Address" or "Proof of Residence" letter (bank, municipality, traffic department, SAPS) MUST be classified as "Bank Letter" — never "Other". If any of these point to one of the 16 Capaciti types, pick that type even when the filename gives no hint. For unfamiliar documents, still extract all readable information and verify candidate name, surname, and ID number where present. Mark non-required missing stamp or certification findings as warning checks prefixed with "Optional -". Respond using the extract_document_info function. Be thorough in your validation checks.`;
+  const textPrompt = `Analyze this document. Filename: "${fileName}". ${filenamePrompt} ${crossReferencePrompt} Full QA validation applies ONLY to Certified ID, EEA1 Form and Beneficiary Agreement. For every other document type, emit only the single "Optional - Document received and readable" check, never fail, and never populate issues — but still classify and extract everything readable. Check all pages before deciding anything is missing. Do not stop at the first pages of a multi-page document. Read pen marks, ticks, handwritten selections, and check boxes carefully because they contain important answers. Many forms are filled in by hand — transcribe handwritten names, IDs, dates and signatures with the same care as printed text. Handwriting will appear in many styles (block print, lowercase print, cursive, joined or stylized, slanted, neat or messy, in pen/pencil/marker of any colour) — interpret the intended characters regardless of style. Treat signatures and initials as PRESENT whenever any deliberate handwritten ink mark sits in the signature/initials area, even if the mark is a stylized scribble, monogram, single stroke, or otherwise unreadable; only mark them missing when the area is clearly empty. Remember to extract stamp dates, police station names, and certification authority details even when stamps overlap words. For employment equity forms, treat the nationality answer as Yes or No: No means South African, Yes means foreign national. If foreign national is marked yes, extract the acquired date of nationality, residence date, or permit-related date into extracted_info.foreign_national_support_date. If the filename or readable contents clearly indicate MIE verification, a course or training completion certificate, or another listed supporting document type, classify it using that specific document_type instead of "Other". CHOOSE "Other" ONLY AS A LAST RESORT. Before picking "Other", scan the document for: (a) form codes such as EEA1, TCX, IRP5, BA; (b) letterheads (SARS, SAPS, banks, municipalities, training providers); (c) titles like "Affidavit", "Bank Letter", "Proof of Address", "Proof of Residence", "Curriculum Vitae", "Certificate of Completion", "Matric Certificate", "Senior Certificate"; (d) signatory blocks ("Commissioner of Oaths"). A "Proof of Address" or "Proof of Residence" letter (bank, municipality, traffic department, SAPS) MUST be classified as "Bank Letter" — never "Other". If any of these point to one of the 16 Capaciti types, pick that type even when the filename gives no hint. Respond using the extract_document_info function.`;
   
   try {
     const base64 = await fetchFileAsBase64(fileUrl);
@@ -1136,11 +1040,14 @@ serve(async (req) => {
       }
     }
 
-    // Sync mode with OpenRouter — run Stage A (validation) and Stage B (handwriting) in parallel
-    console.log(`Using OpenRouter (sync, model: ${aiModel}) for document analysis + handwriting pass`);
+    // Sync mode with OpenRouter — Stage A (validation) always runs.
+    // Stage B (handwriting) only runs for the types that still undergo full QA.
+    const HANDWRITING_DOC_TYPES = ["Certified ID", "EEA1 Form", "Beneficiary Agreement"];
+    const runHandwriting = !filenameHints.docTypeHint || HANDWRITING_DOC_TYPES.includes(filenameHints.docTypeHint);
+    console.log(`Using OpenRouter (sync, model: ${aiModel}); handwriting pass: ${runHandwriting ? "on" : "skipped"}`);
     const [aiResponseRes, handwritingRes] = await Promise.all([
       analyzeWithOpenRouter(OPENROUTER_API_KEY, aiModel, systemPrompt, file_url, file_name, crossReferenceContext, filenameHints),
-      analyzeHandwriting(OPENROUTER_API_KEY, file_url, file_name),
+      runHandwriting ? analyzeHandwriting(OPENROUTER_API_KEY, file_url, file_name) : Promise.resolve(null),
     ]);
     aiResponse = aiResponseRes;
     const handwriting = handwritingRes;
@@ -1295,20 +1202,19 @@ serve(async (req) => {
       extracted.checks = [...(extracted.checks || []), ...handwritingChecks];
     }
 
-    // ── SA ID Structural Validation (Luhn checksum) ──
+    // ── SA ID Structural Validation (format + Luhn only, QA types only) ──
     extracted.extracted_info = normalizeExtractedInfo(extracted.extracted_info) ?? null;
     const idToValidate = extracted.extracted_id_number || extracted.extracted_info?.id_number;
     let saIdValidation: Record<string, any> | null = null;
 
+    const ID_CHECK_DOC_TYPES = ["Certified ID", "Beneficiary Agreement"];
+    const runIdChecks = ID_CHECK_DOC_TYPES.includes(extracted.document_type);
+
     if (idToValidate && /^\d{13}$/.test(idToValidate.replace(/\s/g, ""))) {
       const cleaned = idToValidate.replace(/\s/g, "");
       const idChecks: { name: string; status: string; detail: string }[] = [];
-      let idValid = true;
 
-      // 1. Length
-      idChecks.push({ name: "ID Length (13 digits)", status: "pass", detail: "ID number contains exactly 13 digits" });
-
-      // 2. Date of birth
+      // Derived info (not scored)
       const yy = cleaned.substring(0, 2);
       const mm = cleaned.substring(2, 4);
       const dd = cleaned.substring(4, 6);
@@ -1320,42 +1226,12 @@ serve(async (req) => {
       const fullYear = century + yearNum;
       const testDate = new Date(fullYear, month - 1, day);
       const dobValid = testDate.getFullYear() === fullYear && testDate.getMonth() === month - 1 && testDate.getDate() === day && testDate <= new Date();
-      idChecks.push({
-        name: "Date of Birth (YYMMDD)",
-        status: dobValid ? "pass" : "fail",
-        detail: dobValid ? `Valid date of birth: ${dd}/${mm}/${fullYear}` : `Invalid date segment: ${yy}-${mm}-${dd}`,
-      });
-      if (!dobValid) idValid = false;
-
-      // 3. Gender
       const genderSeq = parseInt(cleaned.substring(6, 10), 10);
       const derivedGender = genderSeq >= 5000 ? "Male" : "Female";
-      idChecks.push({ name: "Gender Sequence (SSSS)", status: "pass", detail: `Sequence ${cleaned.substring(6, 10)} → ${derivedGender}` });
-
-      // 4. Gender cross-check
-      const extractedGender = extracted.extracted_info?.gender;
-      if (extractedGender) {
-        const ng = extractedGender.toLowerCase().trim();
-        const genderMatch = (ng === "male" && derivedGender === "Male") || (ng === "female" && derivedGender === "Female") || (ng === "m" && derivedGender === "Male") || (ng === "f" && derivedGender === "Female");
-        idChecks.push({
-          name: "Gender Cross-Check",
-          status: genderMatch ? "pass" : "fail",
-          detail: genderMatch ? `Extracted gender matches ID-derived gender (${derivedGender})` : `Mismatch: extracted "${extractedGender}" but ID indicates ${derivedGender}`,
-        });
-        if (!genderMatch) idValid = false;
-      }
-
-      // 5. Citizenship
       const citizenDigit = cleaned[10];
       const validCitizen = citizenDigit === "0" || citizenDigit === "1";
-      idChecks.push({
-        name: "Citizenship Indicator",
-        status: validCitizen ? "pass" : "fail",
-        detail: validCitizen ? `Digit ${citizenDigit} → ${citizenDigit === "0" ? "SA Citizen" : "Permanent Resident"}` : `Invalid citizenship digit: ${citizenDigit}`,
-      });
-      if (!validCitizen) idValid = false;
 
-      // 6. Luhn checksum
+      // Luhn checksum
       let luhnSum = 0;
       for (let i = 0; i < 13; i++) {
         let d = parseInt(cleaned[i], 10);
@@ -1363,12 +1239,16 @@ serve(async (req) => {
         luhnSum += d;
       }
       const luhnValid = luhnSum % 10 === 0;
-      idChecks.push({
-        name: "Luhn Checksum",
-        status: luhnValid ? "pass" : "fail",
-        detail: luhnValid ? "Checksum digit verified successfully" : "Checksum digit is incorrect — ID number may be invalid or misread",
-      });
-      if (!luhnValid) idValid = false;
+      const idValid = luhnValid;
+
+      if (runIdChecks) {
+        idChecks.push({ name: "ID Length (13 digits)", status: "pass", detail: "ID number contains exactly 13 digits" });
+        idChecks.push({
+          name: "Luhn Checksum",
+          status: luhnValid ? "pass" : "fail",
+          detail: luhnValid ? "Checksum digit verified successfully" : "Checksum digit is incorrect — ID number may be invalid or misread",
+        });
+      }
 
       saIdValidation = {
         valid: idValid,
@@ -1378,17 +1258,36 @@ serve(async (req) => {
         citizenship: validCitizen ? (citizenDigit === "0" ? "SA Citizen" : "Permanent Resident") : null,
       };
 
-      // Append SA ID checks to the main checks array
-      extracted.checks = [...(extracted.checks || []), ...idChecks];
+      if (runIdChecks) {
+        extracted.checks = [...(extracted.checks || []), ...idChecks];
 
-      if (!idValid) {
-        extracted.issues = [...(extracted.issues || []), "SA ID number failed structural validation"];
-        if (extracted.validation_status === "pass") {
-          extracted.validation_status = "warning";
+        if (!idValid) {
+          extracted.issues = [...(extracted.issues || []), "SA ID number failed structural validation"];
+          if (extracted.validation_status === "pass") {
+            extracted.validation_status = "warning";
+          }
         }
       }
 
-      console.log(`SA ID validation for ${cleaned}: ${idValid ? "PASS" : "FAIL"}`);
+      console.log(`SA ID validation for ${cleaned}: ${runIdChecks ? (idValid ? "PASS" : "FAIL") : "skipped (informational doc type)"}`);
+    }
+
+    // ── Enforce reduced validation scope: only 3 doc types may fail ──
+    const QA_DOC_TYPES = ["Certified ID", "EEA1 Form", "Beneficiary Agreement"];
+    if (!QA_DOC_TYPES.includes(extracted.document_type)) {
+      extracted.checks = (extracted.checks || []).map((c: any) => {
+        if (c.status !== "fail") return c;
+        const name = String(c.name || "");
+        return {
+          ...c,
+          status: "warning",
+          name: name.startsWith("Optional - ") ? name : `Optional - ${name}`,
+        };
+      });
+      extracted.issues = [];
+      if (extracted.validation_status === "fail") {
+        extracted.validation_status = "pass";
+      }
     }
 
     // Update document with AI results
