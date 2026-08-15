@@ -69,6 +69,14 @@ const AppRoutes = () => {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/processor"
+        element={
+          <ProtectedRoute>
+            <DocumentProcessor />
+          </ProtectedRoute>
+        }
+      />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );
