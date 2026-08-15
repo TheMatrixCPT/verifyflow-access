@@ -80,7 +80,7 @@ export function extractIdNumberFromText(text: string): string | null {
   const candidates = text.match(/\b\d[\d\s]{11,19}\d\b/g) || [];
   for (const candidate of candidates) {
     const digits = candidate.replace(/\D/g, "");
-    if (digits.length === 13 && validateSAId(digits).isValid) return digits;
+    if (digits.length === 13 && validateSAId(digits).valid) return digits;
   }
   for (const candidate of candidates) {
     const digits = candidate.replace(/\D/g, "");
