@@ -8,3 +8,6 @@ verify_jwt = false
 
 [functions.extract-answer-key]
 verify_jwt = false
+
+[functions.extract-text]
+verify_jwt = false

@@ -1,4 +1,4 @@
-import { Settings, Search, LogOut, User } from "lucide-react";
+import { Settings, Search, LogOut, User, FileCog } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
@@ -33,6 +33,13 @@ const Header = () => {
       </div>
 
       <div className="flex items-center gap-4">
+        <Link to="/processor">
+          <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground">
+            <FileCog className="h-4 w-4" />
+            Document Processor
+          </Button>
+        </Link>
+
         {/* Admin Name Display */}
         {admin && (
           <div className="flex items-center gap-2 text-sm text-foreground">
