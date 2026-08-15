@@ -8,6 +8,7 @@ import Index from "./pages/Index";
 import SessionDetail from "./pages/SessionDetail";
 import Settings from "./pages/Settings";
 import Assessment from "./pages/Assessment";
+import DocumentProcessor from "./pages/DocumentProcessor";
 import NotFound from "./pages/NotFound";
 import Login from "./pages/Login";
 
