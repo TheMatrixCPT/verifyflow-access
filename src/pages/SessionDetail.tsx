@@ -195,6 +195,33 @@ const SessionDetail = () => {
     toast.success("CSV report downloaded");
   };
 
+  const handleDownloadCandidateDocuments = async () => {
+    const exportCandidates = candidatesWithDocs.map((candidate) => ({
+      name: candidate.name,
+      idNumber: candidate.idNumber === "N/A" ? null : candidate.idNumber,
+      documents: candidate.documents
+        .filter((doc) => Boolean(doc.filePath))
+        .map((doc) => ({ fileName: doc.fileName, filePath: doc.filePath as string })),
+    }));
+
+    const toastId = toast.loading("Preparing candidate documents…");
+    try {
+      const result = await downloadSessionCandidateZip(session?.name || "Session", exportCandidates, async (filePath) => {
+        const { data, error } = await supabase.storage.from("documents").download(filePath);
+        if (error || !data) throw new Error(error?.message || "File could not be downloaded");
+        return data;
+      });
+      const failedNote = result.failed.length > 0 ? ` ${result.failed.length} file(s) could not be downloaded.` : "";
+      toast.success(
+        `Exported ${result.files} document${result.files === 1 ? "" : "s"} across ${result.candidates} candidate folder${result.candidates === 1 ? "" : "s"}.${failedNote}`,
+        { id: toastId },
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not build the candidate archive.", { id: toastId });
+    }
+  };
+
+
   const handleDeleteCandidate = async (candidateId: string) => {
     try {
       await deleteCandidate(candidateId);
