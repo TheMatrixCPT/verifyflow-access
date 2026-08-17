@@ -424,9 +424,9 @@ INFORMATION EXTRACTION RULES:
 - Leave fields as empty string if not found — never invent information.
 
 STAMP DATE VALIDITY:
-- For Certified ID ONLY: the stamp date must be within the current programme YEAR (${today.substring(0, 4)}). If expired, add a FAIL check and include in issues.
+- For Certified ID: do NOT judge the stamp date at all. Only report the date you literally read on the certification stamp (stamp_date / certified_id_observations.stamp_date_iso) and the ID's own issue date separately. A rules engine performs the programme-year comparison.
 - For every other document type: extract stamp_date when visible but do NOT fail or warn on stamp age (validation disabled).
-- Set stamp_date_valid accordingly.
+- Leave stamp_date_valid unset; it is computed downstream.
 
 VALIDATION OUTPUT RULES:
 - For each check performed, include it in the "checks" array with name, status (pass/warning/fail), and detail
