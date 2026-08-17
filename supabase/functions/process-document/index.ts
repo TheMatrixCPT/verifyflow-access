@@ -362,18 +362,19 @@ Only THREE document types undergo full QA and may FAIL:
   3. Beneficiary Agreement
 EVERY other document type is INFORMATIONAL ONLY: emit exactly ONE check, prefixed "Optional - ", with status pass or warning — NEVER fail, and NEVER add entries to "issues". Still classify the document correctly and still extract all readable information.
 
-═══ 1. CERTIFIED ID (full QA) ═══
-Required checks:
-- Image clarity: Is the image clear and not blurry?
-- ID number readable: 13-digit SA ID number visible and legible
-- All ID details legible: name, surname, date of birth, photo
-- Certification stamp present (Commissioner of Oaths or Police)
-- Stamp authority: identify Police Station name OR Commissioner of Oaths
-- Stamp signed: signature next to the certification stamp
-- Stamp dated: a date is written/printed on the stamp
-- Stamp date within the PROGRAMME YEAR: the certification date must fall within the current calendar year (year of the programme = year of TODAY's date ${today.substring(0, 4)}). If the date is from a previous year → fail. Use this rule INSTEAD of the generic "${stampValidityMonths} month" rule for Certified ID.
-- Barcode visible (if it is a card-type ID — barcode should be visible on the back). For book IDs this is N/A — emit as "Optional - Barcode visibility" warning.
-- Extract: stamp_date, police_station, certification_authority.
+═══ 1. CERTIFIED ID (observation only — DO NOT JUDGE) ═══
+For Certified ID you must NOT emit pass/fail checks and must NOT decide whether the stamp is valid.
+Instead fill the "certified_id_observations" object with RAW, LITERAL observations. A separate rules engine turns them into checks.
+Rules for filling it:
+- stamp_date_iso / stamp_date_text = ONLY the date written inside or next to the CERTIFICATION STAMP (Commissioner of Oaths / SAPS).
+- The ID card or book's own issue date is a DIFFERENT date. Put it in id_issue_date. NEVER put it in stamp_date_iso, and never let it influence anything about the stamp.
+- If no date is visible on the stamp, set stamp_date_present = false and leave stamp_date_iso empty. Do not guess or substitute another date.
+- stamp_signature_present = true whenever any deliberate handwritten ink mark sits in the stamp/signature area, even if it is a scribble or monogram.
+- id_format = "card" for smart card IDs, "book" for green ID books, "passport" for passports, "unknown" if you cannot tell.
+- barcode_front_visible / barcode_back_visible only matter for card IDs; leave them alone for book/passport.
+- Also fill: stamp_date (same value as stamp_date_iso), police_station, certification_authority, extracted_id_number, surname, forenames.
+- Still set document_type, candidate_name, confidence, summary and extracted_info as usual. Leave "checks" empty and "issues" empty for Certified ID; set validation_status to "pass" as a placeholder — the rules engine overwrites it.
+
 
 ═══ 2. EEA1 FORM (Department of Labour) (full QA) ═══
 Required checks:
