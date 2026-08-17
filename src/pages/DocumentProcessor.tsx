@@ -11,9 +11,17 @@ import {
   XCircle,
   Loader2,
   ArrowRight,
+  ChevronDown,
+  Wand2,
 } from "lucide-react";
 import Header from "@/components/Header";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import {
   buildOutputZip,
@@ -23,6 +31,9 @@ import {
   stageZip,
   triggerDownload,
 } from "@/lib/processor/pipeline";
+import { downloadCandidateGroupedZip } from "@/lib/processor/grouping";
+import { buildNewFileName, statusForMetadata } from "@/lib/processor/naming";
+import ResolveDocumentDialog, { type ResolveResult } from "@/components/processor/ResolveDocumentDialog";
 import { STATUS_LABELS, type ProcessedFileRecord, type ProcessorMode, type ProcessorStatus } from "@/lib/processor/types";
 import { createSession, uploadAndProcessFiles } from "@/lib/api";
 
@@ -36,6 +47,7 @@ const STATUS_STYLES: Record<ProcessorStatus, { className: string; Icon: typeof C
   "skipped-unsupported": { className: "text-muted-foreground bg-muted", Icon: XCircle },
 };
 
+
 const DocumentProcessor = () => {
   const navigate = useNavigate();
   const [mode, setMode] = useState<ProcessorMode>("individual");
@@ -45,7 +57,9 @@ const DocumentProcessor = () => {
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [isSending, setIsSending] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [resolveId, setResolveId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
 
   const summary = useMemo(() => {
     const renamed = records.filter((record) => record.status === "renamed").length;
@@ -115,6 +129,75 @@ const DocumentProcessor = () => {
       toast.error("Could not build the download archive.");
     }
   };
+
+  const handleDownloadGrouped = async () => {
+    try {
+      const result = await downloadCandidateGroupedZip(records, `Processed batch ${new Date().toLocaleDateString()}`);
+      toast.success(`Exported ${result.files} document${result.files === 1 ? "" : "s"} across ${result.candidates} candidate folder${result.candidates === 1 ? "" : "s"}.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not build the candidate archive.");
+    }
+  };
+
+  const handleDownloadCsv = () => {
+    const rows = [
+      ["Original Name", "New Name", "Candidate Name", "ID Number", "Document Type", "Status"],
+      ...records.map((record) => [
+        record.originalName,
+        record.newName || "",
+        record.metadata?.candidateName || "",
+        record.metadata?.idNumber || "",
+        record.metadata?.documentType || "",
+        STATUS_LABELS[record.status],
+      ]),
+    ];
+    const csv = rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
+    triggerDownload(new Blob([csv], { type: "text/csv;charset=utf-8" }), "processing-report.csv");
+  };
+
+  const knownCandidates = useMemo(() => {
+    const map = new Map<string, { name: string; idNumber: string | null }>();
+    for (const record of records) {
+      const name = record.metadata?.candidateName?.trim();
+      if (!name) continue;
+      const idNumber = record.metadata?.idNumber?.trim() || null;
+      map.set(`${name.toLowerCase()}|${idNumber || ""}`, { name, idNumber });
+    }
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [records]);
+
+  const resolveRecord = useMemo(() => records.find((record) => record.id === resolveId) ?? null, [records, resolveId]);
+
+  const handleResolveSave = (recordId: string, result: ResolveResult) => {
+    setRecords((previous) => {
+      const usedNames = new Set(
+        previous.filter((record) => record.id !== recordId && record.newName).map((record) => (record.newName as string).toLowerCase()),
+      );
+      return previous.map((record) => {
+        if (record.id !== recordId) return record;
+        const metadata = {
+          candidateName: result.candidateName || null,
+          candidateNameSource: "manual" as const,
+          idNumber: result.idNumber || null,
+          idNumberSource: "manual" as const,
+          documentType: result.documentType,
+          documentTypeSource: "manual" as const,
+          matchBasis: ["resolved manually by staff"],
+        };
+        return {
+          ...record,
+          metadata,
+          newName: buildNewFileName(record.originalName, metadata, usedNames),
+          status: statusForMetadata(metadata),
+          errorMessage: undefined,
+        };
+      });
+    });
+    setResolveId(null);
+    toast.success("Document resolved and renamed.");
+  };
+
+
 
   const handleSendToSession = async () => {
     const files = renamedFiles(records);
@@ -254,6 +337,7 @@ const DocumentProcessor = () => {
                       <th className="text-left font-medium px-4 py-3">New name</th>
                       <th className="text-left font-medium px-4 py-3">Detected</th>
                       <th className="text-left font-medium px-4 py-3">Status</th>
+                      <th className="text-right font-medium px-4 py-3">Action</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -284,6 +368,12 @@ const DocumentProcessor = () => {
                               {STATUS_LABELS[record.status]}
                             </span>
                           </td>
+                          <td className="px-4 py-3 text-right">
+                            <Button variant="ghost" size="sm" onClick={() => setResolveId(record.id)} disabled={isRunning}>
+                              <Wand2 className="h-4 w-4" />
+                              Resolve
+                            </Button>
+                          </td>
                         </tr>
                       );
                     })}
@@ -293,39 +383,26 @@ const DocumentProcessor = () => {
             </div>
 
             <div className="flex flex-wrap gap-3">
-              <Button variant="outline" onClick={handleDownloadAll} disabled={isRunning}>
-                <Download className="h-4 w-4" />
-                Download renamed ZIP
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  const rows = [
-                    ["Original Name", "New Name", "Candidate Name", "ID Number", "Document Type", "Status"],
-                    ...records.map((record) => [
-                      record.originalName,
-                      record.newName || "",
-                      record.metadata?.candidateName || "",
-                      record.metadata?.idNumber || "",
-                      record.metadata?.documentType || "",
-                      STATUS_LABELS[record.status],
-                    ]),
-                  ];
-                  const csv = rows
-                    .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
-                    .join("\n");
-                  triggerDownload(new Blob([csv], { type: "text/csv;charset=utf-8" }), "processing-report.csv");
-                }}
-                disabled={isRunning}
-              >
-                <Download className="h-4 w-4" />
-                Download report (CSV)
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" className="gap-2" disabled={isRunning}>
+                    <Download className="h-4 w-4" />
+                    <span>Reports &amp; downloads</span>
+                    <ChevronDown className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" sideOffset={4} className="w-[280px]">
+                  <DropdownMenuItem onSelect={handleDownloadAll}>Download renamed files (ZIP)</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={handleDownloadGrouped}>Download all candidate documents (ZIP)</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={handleDownloadCsv}>Download processing report (CSV)</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Button variant="default" onClick={handleSendToSession} disabled={isRunning || isSending}>
                 {isSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
                 Send to validation session
               </Button>
             </div>
+
           </>
         )}
 
@@ -342,7 +419,15 @@ const DocumentProcessor = () => {
           </div>
         )}
       </div>
+
+      <ResolveDocumentDialog
+        record={resolveRecord}
+        knownCandidates={knownCandidates}
+        onClose={() => setResolveId(null)}
+        onSave={handleResolveSave}
+      />
     </div>
+
   );
 };
 

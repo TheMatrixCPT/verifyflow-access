@@ -29,11 +29,12 @@ export interface ExtractionResult {
 
 export interface ExtractedMetadata {
   candidateName: string | null;
-  candidateNameSource: "filename" | "content" | null;
+  candidateNameSource: "filename" | "content" | "manual" | null;
   idNumber: string | null;
-  idNumberSource: "filename" | "content" | null;
+  idNumberSource: "filename" | "content" | "manual" | null;
   documentType: string;
-  documentTypeSource: "filename" | "content" | "fallback";
+  documentTypeSource: "filename" | "content" | "manual" | "fallback";
+
   matchBasis: string[];
 }
 
