@@ -57,7 +57,9 @@ const DocumentProcessor = () => {
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [isSending, setIsSending] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [resolveId, setResolveId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
 
   const summary = useMemo(() => {
     const renamed = records.filter((record) => record.status === "renamed").length;
