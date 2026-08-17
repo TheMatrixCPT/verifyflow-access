@@ -29,6 +29,13 @@ const KEYWORD_GROUPS: { type: string; keywords: string[] }[] = [
 
 export const FALLBACK_DOCUMENT_TYPE = "Document";
 
+/** Document types a person can pick from when resolving a file manually. */
+export const DOCUMENT_TYPE_OPTIONS: string[] = [
+  ...KEYWORD_GROUPS.map((group) => group.type),
+  FALLBACK_DOCUMENT_TYPE,
+];
+
+
 const NAME_LABEL_PATTERNS = [
   /full\s*name\s*[:\-]\s*([A-Za-z][A-Za-z'\-.\s]{2,60})/i,
   /candidate(?:\s*name)?\s*[:\-]\s*([A-Za-z][A-Za-z'\-.\s]{2,60})/i,
