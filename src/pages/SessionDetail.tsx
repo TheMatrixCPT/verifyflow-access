@@ -14,6 +14,8 @@ import { format } from "date-fns";
 import { toast } from "sonner";
 import { generateReport, generateReportCsv } from "@/lib/generateReport";
 import { calculateValidationScore } from "@/lib/validationScore";
+import { downloadSessionCandidateZip } from "@/lib/processor/grouping";
+
 import type { DocumentData, CandidateData } from "@/components/CandidateCard";
 
 type FilterType = "all" | "pass" | "fail";
