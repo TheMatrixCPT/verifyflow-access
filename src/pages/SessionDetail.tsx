@@ -265,10 +265,14 @@ const SessionDetail = () => {
                   <ChevronDown className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" sideOffset={4} className="w-[220px]">
+              <DropdownMenuContent align="end" sideOffset={4} className="w-[280px]">
                 <DropdownMenuItem onSelect={handleDownloadReport}>Download as PDF</DropdownMenuItem>
                 <DropdownMenuItem onSelect={handleDownloadCsv}>Download as CSV</DropdownMenuItem>
+                <DropdownMenuItem onSelect={handleDownloadCandidateDocuments}>
+                  Download all candidate documents (ZIP)
+                </DropdownMenuItem>
               </DropdownMenuContent>
+
             </DropdownMenu>
           </div>
         </div>
