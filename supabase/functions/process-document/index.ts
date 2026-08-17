@@ -869,6 +869,194 @@ function reconcileHandwriting(
   return extraChecks;
 }
 
+// ─────────────────────────────────────────────────────────────
+// Certified ID rules engine — deterministic, code-side.
+// The model only reports raw observations; every pass/fail below
+// is decided here so the stamp-date bug cannot recur.
+// ─────────────────────────────────────────────────────────────
+
+type IdCheck = { name: string; status: "pass" | "warning" | "fail"; detail: string };
+
+function parseStampDate(raw: unknown): { iso: string; year: number } | null {
+  if (!raw) return null;
+  const text = String(raw).trim();
+  if (!text) return null;
+
+  // YYYY-MM-DD / YYYY/MM/DD
+  let m = text.match(/(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (m) {
+    const year = parseInt(m[1], 10);
+    return { iso: `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`, year };
+  }
+  // DD-MM-YYYY / DD/MM/YYYY
+  m = text.match(/(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/);
+  if (m) {
+    const year = parseInt(m[3], 10);
+    return { iso: `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`, year };
+  }
+  // 12 March 2026 / March 12 2026
+  const months = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+  const lower = text.toLowerCase();
+  const monthIndex = months.findIndex((month) => lower.includes(month.slice(0, 3)));
+  const yearMatch = text.match(/\b(19|20)\d{2}\b/);
+  if (monthIndex >= 0 && yearMatch) {
+    const dayMatch = lower.match(/\b(\d{1,2})\b/);
+    const year = parseInt(yearMatch[0], 10);
+    return {
+      iso: `${year}-${String(monthIndex + 1).padStart(2, "0")}-${(dayMatch ? dayMatch[1] : "01").padStart(2, "0")}`,
+      year,
+    };
+  }
+  // Bare year only
+  if (yearMatch) return { iso: yearMatch[0], year: parseInt(yearMatch[0], 10) };
+  return null;
+}
+
+function normaliseName(value: unknown): string {
+  return String(value ?? "").toLowerCase().replace(/[^a-z]/g, "");
+}
+
+function buildCertifiedIdChecks(input: {
+  observations: Record<string, any> | null | undefined;
+  stampDateFallback?: unknown;
+  idNumber?: string | null;
+  fileName: string;
+  filenameName?: string | null;
+  filenameId?: string | null;
+  contentName?: string | null;
+  contentId?: string | null;
+  programmeYear: number;
+}): { checks: IdCheck[]; issues: string[]; status: "pass" | "warning" | "fail" } {
+  const obs = input.observations || {};
+  const checks: IdCheck[] = [];
+  const issues: string[] = [];
+
+  // ── Rule 1: certification stamp date within the programme year ──
+  const stampPresent = obs.stamp_present !== false;
+  const rawStampDate = obs.stamp_date_iso || obs.stamp_date_text || input.stampDateFallback;
+  const parsed = parseStampDate(rawStampDate);
+  const idIssueDate = obs.id_issue_date ? String(obs.id_issue_date) : null;
+
+  if (!stampPresent) {
+    checks.push({ name: "Certification stamp present", status: "fail", detail: "No certification stamp was found on the document." });
+    issues.push("Certification stamp missing");
+  } else {
+    checks.push({ name: "Certification stamp present", status: "pass", detail: "A certification stamp is visible on the document." });
+  }
+
+  if (!parsed) {
+    checks.push({
+      name: "Certification stamp date within programme year",
+      status: "fail",
+      detail: `No certification stamp date could be read${idIssueDate ? ` (the ID's own issue date ${idIssueDate} is not used for this check)` : ""}.`,
+    });
+    issues.push("Certification stamp date not found");
+  } else if (parsed.year === input.programmeYear) {
+    checks.push({
+      name: "Certification stamp date within programme year",
+      status: "pass",
+      detail: `Certified on ${parsed.iso}, which falls inside the ${input.programmeYear} programme year.`,
+    });
+  } else {
+    checks.push({
+      name: "Certification stamp date within programme year",
+      status: "fail",
+      detail: `Certification stamp is dated ${parsed.iso} (${parsed.year}), outside the ${input.programmeYear} programme year.`,
+    });
+    issues.push(`Certification stamp dated ${parsed.iso} — outside the ${input.programmeYear} programme year`);
+  }
+
+  // ── Rule 2: stamp signed and dated ──
+  const signed = obs.stamp_signature_present === true;
+  const dated = Boolean(parsed) && obs.stamp_date_present !== false;
+  if (signed && dated) {
+    checks.push({ name: "Certification stamp signed and dated", status: "pass", detail: "The stamp carries both a signature and a date." });
+  } else {
+    const missing = [!signed ? "Stamp not signed" : null, !dated ? "Stamp not dated" : null].filter(Boolean).join(" and ");
+    checks.push({ name: "Certification stamp signed and dated", status: "fail", detail: `${missing}.` });
+    if (!signed) issues.push("Stamp not signed");
+    if (!dated) issues.push("Stamp not dated");
+  }
+
+  // ── Rule 3: barcode visible on both sides (card-type only) ──
+  const format = String(obs.id_format || "unknown").toLowerCase();
+  if (format === "card") {
+    const front = obs.barcode_front_visible === true;
+    const back = obs.barcode_back_visible === true;
+    if (front && back) {
+      checks.push({ name: "Barcode visible on both sides", status: "pass", detail: "A barcode is visible on both the front and back of the ID card." });
+    } else {
+      const sides = [!front ? "front" : null, !back ? "back" : null].filter(Boolean).join(" and ");
+      const detail = obs.both_sides_present === false
+        ? "Only one side of the ID card was supplied, so the barcode could not be confirmed on both sides."
+        : `Barcode not visible on the ${sides} of the ID card.`;
+      checks.push({ name: "Barcode visible on both sides", status: "fail", detail });
+      issues.push("Barcode not visible on both sides of the ID card");
+    }
+  } else {
+    checks.push({
+      name: "Barcode visible on both sides",
+      status: "pass",
+      detail: `Not applicable — the document is a ${format === "unknown" ? "non-card" : format}-type identity document.`,
+    });
+  }
+
+  // ── Rule 4: legibility and 13-digit ID number ──
+  const cleanedId = String(input.idNumber || "").replace(/\D/g, "");
+  const legibilityProblems: string[] = [];
+  if (obs.id_number_legible === false) legibilityProblems.push("ID number not legible");
+  if (cleanedId.length !== 13) legibilityProblems.push("13-digit ID number not found");
+  if (obs.personal_details_legible === false) legibilityProblems.push("Name, date of birth or photo not legible");
+  if (obs.image_clear === false) legibilityProblems.push("Scan is blurry, dark or cropped");
+
+  if (legibilityProblems.length === 0) {
+    checks.push({
+      name: "ID legible with a 13-digit ID number",
+      status: "pass",
+      detail: `ID details are legible and a 13-digit ID number (${cleanedId}) was read.`,
+    });
+  } else {
+    checks.push({ name: "ID legible with a 13-digit ID number", status: "fail", detail: legibilityProblems.join("; ") + "." });
+    issues.push(...legibilityProblems);
+  }
+
+  // ── Rule 5: file naming consistency ──
+  const filenameName = normaliseName(input.filenameName);
+  const contentName = normaliseName(input.contentName);
+  const filenameId = String(input.filenameId || "").replace(/\D/g, "");
+  const namingProblems: string[] = [];
+
+  if (!input.filenameName || !filenameId) {
+    namingProblems.push(`Filename does not follow CandidateNameSurname_IDNo_FileName ("${input.fileName}")`);
+  } else {
+    if (contentName && !(filenameName.includes(contentName) || contentName.includes(filenameName))) {
+      namingProblems.push(`Filename name "${input.filenameName}" does not match the name on the ID ("${input.contentName}")`);
+    }
+    if (cleanedId.length === 13 && filenameId !== cleanedId) {
+      namingProblems.push(`Filename ID ${filenameId} does not match the ID number on the document (${cleanedId})`);
+    }
+  }
+
+  if (namingProblems.length === 0) {
+    checks.push({
+      name: "File naming consistency",
+      status: "pass",
+      detail: `Filename follows CandidateNameSurname_IDNo_FileName and matches the extracted name and ID number.`,
+    });
+  } else {
+    checks.push({ name: "File naming consistency", status: "warning", detail: namingProblems.join("; ") + "." });
+  }
+
+  const status: "pass" | "warning" | "fail" = checks.some((check) => check.status === "fail")
+    ? "fail"
+    : checks.some((check) => check.status === "warning")
+      ? "warning"
+      : "pass";
+
+  return { checks, issues, status };
+}
+
+
 // Canonical doc-type list mirrored from extract_document_info schema.
 const CAPACITI_DOC_TYPES = [
   "Certified ID",
