@@ -246,6 +246,28 @@ const toolSchema = {
         stamp_date_valid: { type: "boolean", description: "Whether the stamp date is within the configured validity period" },
         police_station: { type: "string", description: "Police station name if found on stamp or document" },
         certification_authority: { type: "string", description: "Commissioner of Oaths or Police station that certified the document" },
+        certified_id_observations: {
+          type: "object",
+          description: "RAW OBSERVATIONS ONLY for Certified ID documents. Report what you literally see. Never judge validity here.",
+          properties: {
+            stamp_date_present: { type: "boolean", description: "True only if a date is written or printed inside/next to the certification stamp" },
+            stamp_date_text: { type: "string", description: "The certification stamp date exactly as written on the stamp (verbatim)" },
+            stamp_date_iso: { type: "string", description: "The certification stamp date normalised to YYYY-MM-DD. NEVER put the ID card/book issue date here." },
+            stamp_signature_present: { type: "boolean", description: "True if any deliberate handwritten signature mark sits in/next to the certification stamp" },
+            stamp_present: { type: "boolean", description: "True if a certification stamp is visible at all" },
+            id_issue_date: { type: "string", description: "The date the ID card or book itself was issued (separate from the certification stamp date)" },
+            id_format: { type: "string", enum: ["card", "book", "passport", "unknown"], description: "Physical format of the identity document" },
+            barcode_front_visible: { type: "boolean", description: "Card IDs only: barcode visible on the front image" },
+            barcode_back_visible: { type: "boolean", description: "Card IDs only: barcode visible on the back image" },
+            both_sides_present: { type: "boolean", description: "Card IDs only: are both the front and back of the card included?" },
+            id_number_legible: { type: "boolean", description: "Is the 13-digit ID number clearly readable?" },
+            personal_details_legible: { type: "boolean", description: "Are the name, surname, date of birth and photo clearly readable?" },
+            image_clear: { type: "boolean", description: "Is the scan/photo clear rather than blurry, dark or cropped?" },
+            surname: { type: "string", description: "Surname exactly as printed on the ID" },
+            forenames: { type: "string", description: "Forenames/given names exactly as printed on the ID" }
+          }
+        },
+
         extracted_info: {
           type: "object",
           description: "All extracted information from the document",
@@ -340,18 +362,19 @@ Only THREE document types undergo full QA and may FAIL:
   3. Beneficiary Agreement
 EVERY other document type is INFORMATIONAL ONLY: emit exactly ONE check, prefixed "Optional - ", with status pass or warning — NEVER fail, and NEVER add entries to "issues". Still classify the document correctly and still extract all readable information.
 
-═══ 1. CERTIFIED ID (full QA) ═══
-Required checks:
-- Image clarity: Is the image clear and not blurry?
-- ID number readable: 13-digit SA ID number visible and legible
-- All ID details legible: name, surname, date of birth, photo
-- Certification stamp present (Commissioner of Oaths or Police)
-- Stamp authority: identify Police Station name OR Commissioner of Oaths
-- Stamp signed: signature next to the certification stamp
-- Stamp dated: a date is written/printed on the stamp
-- Stamp date within the PROGRAMME YEAR: the certification date must fall within the current calendar year (year of the programme = year of TODAY's date ${today.substring(0, 4)}). If the date is from a previous year → fail. Use this rule INSTEAD of the generic "${stampValidityMonths} month" rule for Certified ID.
-- Barcode visible (if it is a card-type ID — barcode should be visible on the back). For book IDs this is N/A — emit as "Optional - Barcode visibility" warning.
-- Extract: stamp_date, police_station, certification_authority.
+═══ 1. CERTIFIED ID (observation only — DO NOT JUDGE) ═══
+For Certified ID you must NOT emit pass/fail checks and must NOT decide whether the stamp is valid.
+Instead fill the "certified_id_observations" object with RAW, LITERAL observations. A separate rules engine turns them into checks.
+Rules for filling it:
+- stamp_date_iso / stamp_date_text = ONLY the date written inside or next to the CERTIFICATION STAMP (Commissioner of Oaths / SAPS).
+- The ID card or book's own issue date is a DIFFERENT date. Put it in id_issue_date. NEVER put it in stamp_date_iso, and never let it influence anything about the stamp.
+- If no date is visible on the stamp, set stamp_date_present = false and leave stamp_date_iso empty. Do not guess or substitute another date.
+- stamp_signature_present = true whenever any deliberate handwritten ink mark sits in the stamp/signature area, even if it is a scribble or monogram.
+- id_format = "card" for smart card IDs, "book" for green ID books, "passport" for passports, "unknown" if you cannot tell.
+- barcode_front_visible / barcode_back_visible only matter for card IDs; leave them alone for book/passport.
+- Also fill: stamp_date (same value as stamp_date_iso), police_station, certification_authority, extracted_id_number, surname, forenames.
+- Still set document_type, candidate_name, confidence, summary and extracted_info as usual. Leave "checks" empty and "issues" empty for Certified ID; set validation_status to "pass" as a placeholder — the rules engine overwrites it.
+
 
 ═══ 2. EEA1 FORM (Department of Labour) (full QA) ═══
 Required checks:
@@ -401,9 +424,9 @@ INFORMATION EXTRACTION RULES:
 - Leave fields as empty string if not found — never invent information.
 
 STAMP DATE VALIDITY:
-- For Certified ID ONLY: the stamp date must be within the current programme YEAR (${today.substring(0, 4)}). If expired, add a FAIL check and include in issues.
+- For Certified ID: do NOT judge the stamp date at all. Only report the date you literally read on the certification stamp (stamp_date / certified_id_observations.stamp_date_iso) and the ID's own issue date separately. A rules engine performs the programme-year comparison.
 - For every other document type: extract stamp_date when visible but do NOT fail or warn on stamp age (validation disabled).
-- Set stamp_date_valid accordingly.
+- Leave stamp_date_valid unset; it is computed downstream.
 
 VALIDATION OUTPUT RULES:
 - For each check performed, include it in the "checks" array with name, status (pass/warning/fail), and detail
@@ -846,6 +869,194 @@ function reconcileHandwriting(
   return extraChecks;
 }
 
+// ─────────────────────────────────────────────────────────────
+// Certified ID rules engine — deterministic, code-side.
+// The model only reports raw observations; every pass/fail below
+// is decided here so the stamp-date bug cannot recur.
+// ─────────────────────────────────────────────────────────────
+
+type IdCheck = { name: string; status: "pass" | "warning" | "fail"; detail: string };
+
+function parseStampDate(raw: unknown): { iso: string; year: number } | null {
+  if (!raw) return null;
+  const text = String(raw).trim();
+  if (!text) return null;
+
+  // YYYY-MM-DD / YYYY/MM/DD
+  let m = text.match(/(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (m) {
+    const year = parseInt(m[1], 10);
+    return { iso: `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`, year };
+  }
+  // DD-MM-YYYY / DD/MM/YYYY
+  m = text.match(/(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/);
+  if (m) {
+    const year = parseInt(m[3], 10);
+    return { iso: `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`, year };
+  }
+  // 12 March 2026 / March 12 2026
+  const months = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+  const lower = text.toLowerCase();
+  const monthIndex = months.findIndex((month) => lower.includes(month.slice(0, 3)));
+  const yearMatch = text.match(/\b(19|20)\d{2}\b/);
+  if (monthIndex >= 0 && yearMatch) {
+    const dayMatch = lower.match(/\b(\d{1,2})\b/);
+    const year = parseInt(yearMatch[0], 10);
+    return {
+      iso: `${year}-${String(monthIndex + 1).padStart(2, "0")}-${(dayMatch ? dayMatch[1] : "01").padStart(2, "0")}`,
+      year,
+    };
+  }
+  // Bare year only
+  if (yearMatch) return { iso: yearMatch[0], year: parseInt(yearMatch[0], 10) };
+  return null;
+}
+
+function normaliseName(value: unknown): string {
+  return String(value ?? "").toLowerCase().replace(/[^a-z]/g, "");
+}
+
+function buildCertifiedIdChecks(input: {
+  observations: Record<string, any> | null | undefined;
+  stampDateFallback?: unknown;
+  idNumber?: string | null;
+  fileName: string;
+  filenameName?: string | null;
+  filenameId?: string | null;
+  contentName?: string | null;
+  contentId?: string | null;
+  programmeYear: number;
+}): { checks: IdCheck[]; issues: string[]; status: "pass" | "warning" | "fail" } {
+  const obs = input.observations || {};
+  const checks: IdCheck[] = [];
+  const issues: string[] = [];
+
+  // ── Rule 1: certification stamp date within the programme year ──
+  const stampPresent = obs.stamp_present !== false;
+  const rawStampDate = obs.stamp_date_iso || obs.stamp_date_text || input.stampDateFallback;
+  const parsed = parseStampDate(rawStampDate);
+  const idIssueDate = obs.id_issue_date ? String(obs.id_issue_date) : null;
+
+  if (!stampPresent) {
+    checks.push({ name: "Certification stamp present", status: "fail", detail: "No certification stamp was found on the document." });
+    issues.push("Certification stamp missing");
+  } else {
+    checks.push({ name: "Certification stamp present", status: "pass", detail: "A certification stamp is visible on the document." });
+  }
+
+  if (!parsed) {
+    checks.push({
+      name: "Certification stamp date within programme year",
+      status: "fail",
+      detail: `No certification stamp date could be read${idIssueDate ? ` (the ID's own issue date ${idIssueDate} is not used for this check)` : ""}.`,
+    });
+    issues.push("Certification stamp date not found");
+  } else if (parsed.year === input.programmeYear) {
+    checks.push({
+      name: "Certification stamp date within programme year",
+      status: "pass",
+      detail: `Certified on ${parsed.iso}, which falls inside the ${input.programmeYear} programme year.`,
+    });
+  } else {
+    checks.push({
+      name: "Certification stamp date within programme year",
+      status: "fail",
+      detail: `Certification stamp is dated ${parsed.iso} (${parsed.year}), outside the ${input.programmeYear} programme year.`,
+    });
+    issues.push(`Certification stamp dated ${parsed.iso} — outside the ${input.programmeYear} programme year`);
+  }
+
+  // ── Rule 2: stamp signed and dated ──
+  const signed = obs.stamp_signature_present === true;
+  const dated = Boolean(parsed) && obs.stamp_date_present !== false;
+  if (signed && dated) {
+    checks.push({ name: "Certification stamp signed and dated", status: "pass", detail: "The stamp carries both a signature and a date." });
+  } else {
+    const missing = [!signed ? "Stamp not signed" : null, !dated ? "Stamp not dated" : null].filter(Boolean).join(" and ");
+    checks.push({ name: "Certification stamp signed and dated", status: "fail", detail: `${missing}.` });
+    if (!signed) issues.push("Stamp not signed");
+    if (!dated) issues.push("Stamp not dated");
+  }
+
+  // ── Rule 3: barcode visible on both sides (card-type only) ──
+  const format = String(obs.id_format || "unknown").toLowerCase();
+  if (format === "card") {
+    const front = obs.barcode_front_visible === true;
+    const back = obs.barcode_back_visible === true;
+    if (front && back) {
+      checks.push({ name: "Barcode visible on both sides", status: "pass", detail: "A barcode is visible on both the front and back of the ID card." });
+    } else {
+      const sides = [!front ? "front" : null, !back ? "back" : null].filter(Boolean).join(" and ");
+      const detail = obs.both_sides_present === false
+        ? "Only one side of the ID card was supplied, so the barcode could not be confirmed on both sides."
+        : `Barcode not visible on the ${sides} of the ID card.`;
+      checks.push({ name: "Barcode visible on both sides", status: "fail", detail });
+      issues.push("Barcode not visible on both sides of the ID card");
+    }
+  } else {
+    checks.push({
+      name: "Barcode visible on both sides",
+      status: "pass",
+      detail: `Not applicable — the document is a ${format === "unknown" ? "non-card" : format}-type identity document.`,
+    });
+  }
+
+  // ── Rule 4: legibility and 13-digit ID number ──
+  const cleanedId = String(input.idNumber || "").replace(/\D/g, "");
+  const legibilityProblems: string[] = [];
+  if (obs.id_number_legible === false) legibilityProblems.push("ID number not legible");
+  if (cleanedId.length !== 13) legibilityProblems.push("13-digit ID number not found");
+  if (obs.personal_details_legible === false) legibilityProblems.push("Name, date of birth or photo not legible");
+  if (obs.image_clear === false) legibilityProblems.push("Scan is blurry, dark or cropped");
+
+  if (legibilityProblems.length === 0) {
+    checks.push({
+      name: "ID legible with a 13-digit ID number",
+      status: "pass",
+      detail: `ID details are legible and a 13-digit ID number (${cleanedId}) was read.`,
+    });
+  } else {
+    checks.push({ name: "ID legible with a 13-digit ID number", status: "fail", detail: legibilityProblems.join("; ") + "." });
+    issues.push(...legibilityProblems);
+  }
+
+  // ── Rule 5: file naming consistency ──
+  const filenameName = normaliseName(input.filenameName);
+  const contentName = normaliseName(input.contentName);
+  const filenameId = String(input.filenameId || "").replace(/\D/g, "");
+  const namingProblems: string[] = [];
+
+  if (!input.filenameName || !filenameId) {
+    namingProblems.push(`Filename does not follow CandidateNameSurname_IDNo_FileName ("${input.fileName}")`);
+  } else {
+    if (contentName && !(filenameName.includes(contentName) || contentName.includes(filenameName))) {
+      namingProblems.push(`Filename name "${input.filenameName}" does not match the name on the ID ("${input.contentName}")`);
+    }
+    if (cleanedId.length === 13 && filenameId !== cleanedId) {
+      namingProblems.push(`Filename ID ${filenameId} does not match the ID number on the document (${cleanedId})`);
+    }
+  }
+
+  if (namingProblems.length === 0) {
+    checks.push({
+      name: "File naming consistency",
+      status: "pass",
+      detail: `Filename follows CandidateNameSurname_IDNo_FileName and matches the extracted name and ID number.`,
+    });
+  } else {
+    checks.push({ name: "File naming consistency", status: "warning", detail: namingProblems.join("; ") + "." });
+  }
+
+  const status: "pass" | "warning" | "fail" = checks.some((check) => check.status === "fail")
+    ? "fail"
+    : checks.some((check) => check.status === "warning")
+      ? "warning"
+      : "pass";
+
+  return { checks, issues, status };
+}
+
+
 // Canonical doc-type list mirrored from extract_document_info schema.
 const CAPACITI_DOC_TYPES = [
   "Certified ID",
@@ -1125,6 +1336,11 @@ serve(async (req) => {
       }
     }
 
+    // Number of checks the model itself produced — replaced wholesale for Certified ID.
+    const modelCheckCount = (extracted.checks || []).length;
+
+
+
     // ── Filename-wins override for candidate identification ──
     // The admin named the file, so trust filename for candidate_name, ID, and doc type.
     // Surface mismatches as warnings instead of silently overriding.
@@ -1285,6 +1501,38 @@ serve(async (req) => {
       console.log(`SA ID validation for ${cleaned}: ${runIdChecks ? (idValid ? "PASS" : "FAIL") : "skipped (informational doc type)"}`);
     }
 
+    // ── Certified ID: deterministic rules engine (replaces model-authored checks) ──
+    let certifiedIdValidation: Record<string, any> | null = null;
+    if (extracted.document_type === "Certified ID") {
+      const observations = (extracted as any).certified_id_observations || null;
+      const programmeYear = new Date().getFullYear();
+      const result = buildCertifiedIdChecks({
+        observations,
+        stampDateFallback: extracted.stamp_date,
+        idNumber: extracted.extracted_id_number || extracted.extracted_info?.id_number || null,
+        fileName: file_name,
+        filenameName: filenameHints.candidateName,
+        filenameId: filenameHints.idNumber,
+        contentName: [observations?.forenames, observations?.surname].filter(Boolean).join(" ") || aiCandidateName,
+        contentId: aiIdNumber,
+        programmeYear,
+      });
+
+      // Drop the model's own Certified ID verdicts, keep downstream-generated checks.
+      const retainedChecks = (extracted.checks || []).slice(modelCheckCount);
+      extracted.checks = [...result.checks, ...retainedChecks];
+      extracted.issues = [...result.issues, ...(extracted.issues || []).filter((issue: string) => !result.issues.includes(issue))];
+      extracted.validation_status = result.status === "pass" && retainedChecks.some((c: any) => c.status === "fail")
+        ? "fail"
+        : result.status;
+      const parsedStamp = parseStampDate(observations?.stamp_date_iso || observations?.stamp_date_text || extracted.stamp_date);
+      extracted.stamp_date = parsedStamp?.iso ?? null;
+      extracted.stamp_date_valid = parsedStamp ? parsedStamp.year === programmeYear : false;
+      certifiedIdValidation = { programmeYear, observations, checks: result.checks, status: result.status };
+      console.log(`Certified ID rules engine → ${result.status} (stamp ${extracted.stamp_date ?? "none"}, programme year ${programmeYear})`);
+    }
+
+
     // ── Enforce reduced validation scope: only 3 doc types may fail ──
     const QA_DOC_TYPES = ["Certified ID", "EEA1 Form", "Beneficiary Agreement"];
     if (!QA_DOC_TYPES.includes(extracted.document_type)) {
@@ -1322,6 +1570,7 @@ serve(async (req) => {
         ai_provider: aiProvider,
         ai_model: aiModel,
         sa_id_validation: saIdValidation,
+        certified_id_validation: certifiedIdValidation,
         handwriting: handwriting || null,
         handwriting_model: handwriting ? "google/gemini-2.5-pro" : null,
       },
