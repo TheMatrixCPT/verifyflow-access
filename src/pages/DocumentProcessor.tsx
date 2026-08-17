@@ -130,6 +130,75 @@ const DocumentProcessor = () => {
     }
   };
 
+  const handleDownloadGrouped = async () => {
+    try {
+      const result = await downloadCandidateGroupedZip(records, `Processed batch ${new Date().toLocaleDateString()}`);
+      toast.success(`Exported ${result.files} document${result.files === 1 ? "" : "s"} across ${result.candidates} candidate folder${result.candidates === 1 ? "" : "s"}.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not build the candidate archive.");
+    }
+  };
+
+  const handleDownloadCsv = () => {
+    const rows = [
+      ["Original Name", "New Name", "Candidate Name", "ID Number", "Document Type", "Status"],
+      ...records.map((record) => [
+        record.originalName,
+        record.newName || "",
+        record.metadata?.candidateName || "",
+        record.metadata?.idNumber || "",
+        record.metadata?.documentType || "",
+        STATUS_LABELS[record.status],
+      ]),
+    ];
+    const csv = rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
+    triggerDownload(new Blob([csv], { type: "text/csv;charset=utf-8" }), "processing-report.csv");
+  };
+
+  const knownCandidates = useMemo(() => {
+    const map = new Map<string, { name: string; idNumber: string | null }>();
+    for (const record of records) {
+      const name = record.metadata?.candidateName?.trim();
+      if (!name) continue;
+      const idNumber = record.metadata?.idNumber?.trim() || null;
+      map.set(`${name.toLowerCase()}|${idNumber || ""}`, { name, idNumber });
+    }
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [records]);
+
+  const resolveRecord = useMemo(() => records.find((record) => record.id === resolveId) ?? null, [records, resolveId]);
+
+  const handleResolveSave = (recordId: string, result: ResolveResult) => {
+    setRecords((previous) => {
+      const usedNames = new Set(
+        previous.filter((record) => record.id !== recordId && record.newName).map((record) => (record.newName as string).toLowerCase()),
+      );
+      return previous.map((record) => {
+        if (record.id !== recordId) return record;
+        const metadata = {
+          candidateName: result.candidateName || null,
+          candidateNameSource: "manual" as const,
+          idNumber: result.idNumber || null,
+          idNumberSource: "manual" as const,
+          documentType: result.documentType,
+          documentTypeSource: "manual" as const,
+          matchBasis: ["resolved manually by staff"],
+        };
+        return {
+          ...record,
+          metadata,
+          newName: buildNewFileName(record.originalName, metadata, usedNames),
+          status: statusForMetadata(metadata),
+          errorMessage: undefined,
+        };
+      });
+    });
+    setResolveId(null);
+    toast.success("Document resolved and renamed.");
+  };
+
+
+
   const handleSendToSession = async () => {
     const files = renamedFiles(records);
     if (files.length === 0) {
