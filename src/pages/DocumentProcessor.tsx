@@ -354,12 +354,14 @@ const DocumentProcessor = () => {
                       <th className="text-left font-medium px-4 py-3">New name</th>
                       <th className="text-left font-medium px-4 py-3">Detected</th>
                       <th className="text-left font-medium px-4 py-3">Status</th>
+                      <th className="text-left font-medium px-4 py-3">Validation</th>
                       <th className="text-right font-medium px-4 py-3">Action</th>
                     </tr>
                   </thead>
                   <tbody>
                     {records.map((record) => {
                       const style = STATUS_STYLES[record.status];
+                      const validation = evaluateCertifiedId(record);
                       return (
                         <tr key={record.id} className="border-t border-border align-top">
                           <td className="px-4 py-3 text-foreground break-all">{record.originalName}</td>
@@ -385,12 +387,45 @@ const DocumentProcessor = () => {
                               {STATUS_LABELS[record.status]}
                             </span>
                           </td>
+                          <td className="px-4 py-3">
+                            {validation.applicable ? (
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <button
+                                    type="button"
+                                    className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${CHECK_STATUS_STYLES[validation.status]}`}
+                                  >
+                                    Certified ID · {CHECK_STATUS_LABELS[validation.status]}
+                                  </button>
+                                </PopoverTrigger>
+                                <PopoverContent align="start" className="w-[360px] space-y-3">
+                                  <p className="text-sm font-semibold text-foreground">Certified ID checks</p>
+                                  {validation.checks.map((check) => (
+                                    <div key={check.name} className="space-y-1">
+                                      <div className="flex items-start justify-between gap-2">
+                                        <span className="text-xs font-medium text-foreground">{check.name}</span>
+                                        <span
+                                          className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${CHECK_STATUS_STYLES[check.status]}`}
+                                        >
+                                          {CHECK_STATUS_LABELS[check.status]}
+                                        </span>
+                                      </div>
+                                      <p className="text-xs text-muted-foreground">{check.detail}</p>
+                                    </div>
+                                  ))}
+                                </PopoverContent>
+                              </Popover>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
+                          </td>
                           <td className="px-4 py-3 text-right">
                             <Button variant="ghost" size="sm" onClick={() => setResolveId(record.id)} disabled={isRunning}>
                               <Wand2 className="h-4 w-4" />
                               Resolve
                             </Button>
                           </td>
+
                         </tr>
                       );
                     })}
