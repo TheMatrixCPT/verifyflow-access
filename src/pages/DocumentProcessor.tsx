@@ -11,9 +11,17 @@ import {
   XCircle,
   Loader2,
   ArrowRight,
+  ChevronDown,
+  Wand2,
 } from "lucide-react";
 import Header from "@/components/Header";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import {
   buildOutputZip,
@@ -23,6 +31,9 @@ import {
   stageZip,
   triggerDownload,
 } from "@/lib/processor/pipeline";
+import { downloadCandidateGroupedZip } from "@/lib/processor/grouping";
+import { buildNewFileName, statusForMetadata } from "@/lib/processor/naming";
+import ResolveDocumentDialog, { type ResolveResult } from "@/components/processor/ResolveDocumentDialog";
 import { STATUS_LABELS, type ProcessedFileRecord, type ProcessorMode, type ProcessorStatus } from "@/lib/processor/types";
 import { createSession, uploadAndProcessFiles } from "@/lib/api";
 
@@ -35,6 +46,7 @@ const STATUS_STYLES: Record<ProcessorStatus, { className: string; Icon: typeof C
   "extraction-failed": { className: "text-destructive bg-destructive/10", Icon: XCircle },
   "skipped-unsupported": { className: "text-muted-foreground bg-muted", Icon: XCircle },
 };
+
 
 const DocumentProcessor = () => {
   const navigate = useNavigate();
