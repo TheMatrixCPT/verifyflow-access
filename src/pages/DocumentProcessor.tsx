@@ -337,6 +337,7 @@ const DocumentProcessor = () => {
                       <th className="text-left font-medium px-4 py-3">New name</th>
                       <th className="text-left font-medium px-4 py-3">Detected</th>
                       <th className="text-left font-medium px-4 py-3">Status</th>
+                      <th className="text-right font-medium px-4 py-3">Action</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -367,6 +368,12 @@ const DocumentProcessor = () => {
                               {STATUS_LABELS[record.status]}
                             </span>
                           </td>
+                          <td className="px-4 py-3 text-right">
+                            <Button variant="ghost" size="sm" onClick={() => setResolveId(record.id)} disabled={isRunning}>
+                              <Wand2 className="h-4 w-4" />
+                              Resolve
+                            </Button>
+                          </td>
                         </tr>
                       );
                     })}
@@ -376,39 +383,26 @@ const DocumentProcessor = () => {
             </div>
 
             <div className="flex flex-wrap gap-3">
-              <Button variant="outline" onClick={handleDownloadAll} disabled={isRunning}>
-                <Download className="h-4 w-4" />
-                Download renamed ZIP
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  const rows = [
-                    ["Original Name", "New Name", "Candidate Name", "ID Number", "Document Type", "Status"],
-                    ...records.map((record) => [
-                      record.originalName,
-                      record.newName || "",
-                      record.metadata?.candidateName || "",
-                      record.metadata?.idNumber || "",
-                      record.metadata?.documentType || "",
-                      STATUS_LABELS[record.status],
-                    ]),
-                  ];
-                  const csv = rows
-                    .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
-                    .join("\n");
-                  triggerDownload(new Blob([csv], { type: "text/csv;charset=utf-8" }), "processing-report.csv");
-                }}
-                disabled={isRunning}
-              >
-                <Download className="h-4 w-4" />
-                Download report (CSV)
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" className="gap-2" disabled={isRunning}>
+                    <Download className="h-4 w-4" />
+                    <span>Reports &amp; downloads</span>
+                    <ChevronDown className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" sideOffset={4} className="w-[280px]">
+                  <DropdownMenuItem onSelect={handleDownloadAll}>Download renamed files (ZIP)</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={handleDownloadGrouped}>Download all candidate documents (ZIP)</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={handleDownloadCsv}>Download processing report (CSV)</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Button variant="default" onClick={handleSendToSession} disabled={isRunning || isSending}>
                 {isSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
                 Send to validation session
               </Button>
             </div>
+
           </>
         )}
 
