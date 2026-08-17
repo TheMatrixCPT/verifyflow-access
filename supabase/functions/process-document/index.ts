@@ -1501,6 +1501,38 @@ serve(async (req) => {
       console.log(`SA ID validation for ${cleaned}: ${runIdChecks ? (idValid ? "PASS" : "FAIL") : "skipped (informational doc type)"}`);
     }
 
+    // ── Certified ID: deterministic rules engine (replaces model-authored checks) ──
+    let certifiedIdValidation: Record<string, any> | null = null;
+    if (extracted.document_type === "Certified ID") {
+      const observations = (extracted as any).certified_id_observations || null;
+      const programmeYear = new Date().getFullYear();
+      const result = buildCertifiedIdChecks({
+        observations,
+        stampDateFallback: extracted.stamp_date,
+        idNumber: extracted.extracted_id_number || extracted.extracted_info?.id_number || null,
+        fileName: file_name,
+        filenameName: filenameHints.candidateName,
+        filenameId: filenameHints.idNumber,
+        contentName: [observations?.forenames, observations?.surname].filter(Boolean).join(" ") || aiCandidateName,
+        contentId: aiIdNumber,
+        programmeYear,
+      });
+
+      // Drop the model's own Certified ID verdicts, keep downstream-generated checks.
+      const retainedChecks = (extracted.checks || []).slice(modelCheckCount);
+      extracted.checks = [...result.checks, ...retainedChecks];
+      extracted.issues = [...result.issues, ...(extracted.issues || []).filter((issue: string) => !result.issues.includes(issue))];
+      extracted.validation_status = result.status === "pass" && retainedChecks.some((c: any) => c.status === "fail")
+        ? "fail"
+        : result.status;
+      const parsedStamp = parseStampDate(observations?.stamp_date_iso || observations?.stamp_date_text || extracted.stamp_date);
+      extracted.stamp_date = parsedStamp?.iso ?? null;
+      extracted.stamp_date_valid = parsedStamp ? parsedStamp.year === programmeYear : false;
+      certifiedIdValidation = { programmeYear, observations, checks: result.checks, status: result.status };
+      console.log(`Certified ID rules engine → ${result.status} (stamp ${extracted.stamp_date ?? "none"}, programme year ${programmeYear})`);
+    }
+
+
     // ── Enforce reduced validation scope: only 3 doc types may fail ──
     const QA_DOC_TYPES = ["Certified ID", "EEA1 Form", "Beneficiary Agreement"];
     if (!QA_DOC_TYPES.includes(extracted.document_type)) {
