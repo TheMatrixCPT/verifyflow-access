@@ -419,7 +419,15 @@ const DocumentProcessor = () => {
           </div>
         )}
       </div>
+
+      <ResolveDocumentDialog
+        record={resolveRecord}
+        knownCandidates={knownCandidates}
+        onClose={() => setResolveId(null)}
+        onSave={handleResolveSave}
+      />
     </div>
+
   );
 };
 
