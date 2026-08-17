@@ -1336,6 +1336,11 @@ serve(async (req) => {
       }
     }
 
+    // Number of checks the model itself produced — replaced wholesale for Certified ID.
+    const modelCheckCount = (extracted.checks || []).length;
+
+
+
     // ── Filename-wins override for candidate identification ──
     // The admin named the file, so trust filename for candidate_name, ID, and doc type.
     // Surface mismatches as warnings instead of silently overriding.
