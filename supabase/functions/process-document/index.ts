@@ -246,6 +246,28 @@ const toolSchema = {
         stamp_date_valid: { type: "boolean", description: "Whether the stamp date is within the configured validity period" },
         police_station: { type: "string", description: "Police station name if found on stamp or document" },
         certification_authority: { type: "string", description: "Commissioner of Oaths or Police station that certified the document" },
+        certified_id_observations: {
+          type: "object",
+          description: "RAW OBSERVATIONS ONLY for Certified ID documents. Report what you literally see. Never judge validity here.",
+          properties: {
+            stamp_date_present: { type: "boolean", description: "True only if a date is written or printed inside/next to the certification stamp" },
+            stamp_date_text: { type: "string", description: "The certification stamp date exactly as written on the stamp (verbatim)" },
+            stamp_date_iso: { type: "string", description: "The certification stamp date normalised to YYYY-MM-DD. NEVER put the ID card/book issue date here." },
+            stamp_signature_present: { type: "boolean", description: "True if any deliberate handwritten signature mark sits in/next to the certification stamp" },
+            stamp_present: { type: "boolean", description: "True if a certification stamp is visible at all" },
+            id_issue_date: { type: "string", description: "The date the ID card or book itself was issued (separate from the certification stamp date)" },
+            id_format: { type: "string", enum: ["card", "book", "passport", "unknown"], description: "Physical format of the identity document" },
+            barcode_front_visible: { type: "boolean", description: "Card IDs only: barcode visible on the front image" },
+            barcode_back_visible: { type: "boolean", description: "Card IDs only: barcode visible on the back image" },
+            both_sides_present: { type: "boolean", description: "Card IDs only: are both the front and back of the card included?" },
+            id_number_legible: { type: "boolean", description: "Is the 13-digit ID number clearly readable?" },
+            personal_details_legible: { type: "boolean", description: "Are the name, surname, date of birth and photo clearly readable?" },
+            image_clear: { type: "boolean", description: "Is the scan/photo clear rather than blurry, dark or cropped?" },
+            surname: { type: "string", description: "Surname exactly as printed on the ID" },
+            forenames: { type: "string", description: "Forenames/given names exactly as printed on the ID" }
+          }
+        },
+
         extracted_info: {
           type: "object",
           description: "All extracted information from the document",
