@@ -34,8 +34,25 @@ import {
 import { downloadCandidateGroupedZip } from "@/lib/processor/grouping";
 import { buildNewFileName, statusForMetadata } from "@/lib/processor/naming";
 import ResolveDocumentDialog, { type ResolveResult } from "@/components/processor/ResolveDocumentDialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { evaluateCertifiedId, type CertifiedIdCheckStatus } from "@/lib/processor/certifiedId";
 import { STATUS_LABELS, type ProcessedFileRecord, type ProcessorMode, type ProcessorStatus } from "@/lib/processor/types";
 import { createSession, uploadAndProcessFiles } from "@/lib/api";
+
+const CHECK_STATUS_STYLES: Record<CertifiedIdCheckStatus, string> = {
+  pass: "text-success bg-success/10",
+  warning: "text-warning bg-warning/10",
+  fail: "text-destructive bg-destructive/10",
+  pending: "text-muted-foreground bg-muted",
+};
+
+const CHECK_STATUS_LABELS: Record<CertifiedIdCheckStatus, string> = {
+  pass: "Passed",
+  warning: "Review",
+  fail: "Failed",
+  pending: "Pending validation",
+};
+
 
 const STATUS_STYLES: Record<ProcessorStatus, { className: string; Icon: typeof CheckCircle2 }> = {
   queued: { className: "text-muted-foreground bg-muted", Icon: Loader2 },
