@@ -1570,6 +1570,7 @@ serve(async (req) => {
         ai_provider: aiProvider,
         ai_model: aiModel,
         sa_id_validation: saIdValidation,
+        certified_id_validation: certifiedIdValidation,
         handwriting: handwriting || null,
         handwriting_model: handwriting ? "google/gemini-2.5-pro" : null,
       },
