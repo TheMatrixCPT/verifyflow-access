@@ -1,4 +1,5 @@
 import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
+import { generateChatCompletion, GatewayError, type GeminiChatMessage } from "npm:@lovable.dev/ai-gateway@0.1.11";
 
 interface ExtractRequest {
   fileBase64: string;
@@ -13,8 +14,10 @@ const SYSTEM_PROMPT = `You extract assessment answer keys from a source document
 - which option is the correct answer (both the text and the zero-based index into the options array)
 
 Rules:
-- Only include single-correct multiple-choice questions.
-- If a question has no clear correct answer indicated (no tick, highlight, asterisk, key, or answer section), skip it.
+- Include EVERY multiple-choice question, even if no correct answer is indicated.
+- If no correct answer is explicitly indicated, return correct_option "" and correct_index -1. Never infer or guess the correct answer.
+- A required-field asterisk and an empty radio button are NOT correct-answer markings.
+- Read every page, preserving question order and repeated questions as separate entries.
 - Preserve original casing and punctuation of options.
 - Do not invent options. If you cannot read all options for a question, skip it.
 - Return ALL questions you find — do not summarize or omit.`;
@@ -54,9 +57,6 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const apiKey = Deno.env.get("LOVABLE_API_KEY");
-    if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
-
     const body = (await req.json()) as ExtractRequest;
     if (!body?.fileBase64 || !body?.mimeType) {
       return new Response(
@@ -72,19 +72,20 @@ Deno.serve(async (req) => {
     const isImageOrPdf =
       body.mimeType.startsWith("image/") || body.mimeType === "application/pdf";
 
-    const content: any[] = [
+    const content: Exclude<GeminiChatMessage["content"], string | null | undefined> = [
       {
         type: "text",
         text:
-          "Extract every multiple-choice question, its full set of options, and the correct option from the attached document." +
+          "Extract ALL multiple-choice questions and options from EVERY page. Correct answers are optional; use -1 when unmarked." +
           userHint,
       },
     ];
 
     if (isImageOrPdf) {
       content.push({
-        type: "image_url",
-        image_url: { url: `data:${body.mimeType};base64,${body.fileBase64}` },
+        ...(body.mimeType === "application/pdf"
+          ? { type: "file" as const, file: { filename: body.fileName || "assessment.pdf", file_data: `data:application/pdf;base64,${body.fileBase64}` } }
+          : { type: "image_url" as const, image_url: { url: `data:${body.mimeType};base64,${body.fileBase64}` } }),
       });
     } else {
       // DOCX or text — decode and pass as text
@@ -92,13 +93,7 @@ Deno.serve(async (req) => {
       content.push({ type: "text", text: `\n\n----- DOCUMENT CONTENT -----\n${decoded}` });
     }
 
-    const aiResp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
+    const json = await generateChatCompletion({
         model: "google/gemini-2.5-pro",
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
@@ -106,31 +101,7 @@ Deno.serve(async (req) => {
         ],
         tools: [TOOL],
         tool_choice: { type: "function", function: { name: "return_answer_key" } },
-      }),
     });
-
-    if (aiResp.status === 429) {
-      return new Response(
-        JSON.stringify({ error: "Rate limit exceeded. Please try again in a moment." }),
-        { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-    if (aiResp.status === 402) {
-      return new Response(
-        JSON.stringify({ error: "Lovable AI credits exhausted. Add credits in Settings → Workspace → Usage." }),
-        { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-    if (!aiResp.ok) {
-      const t = await aiResp.text();
-      console.error("AI gateway error", aiResp.status, t);
-      return new Response(
-        JSON.stringify({ error: "AI gateway error", detail: t }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-
-    const json = await aiResp.json();
     const toolCall = json?.choices?.[0]?.message?.tool_calls?.[0];
     const argsRaw = toolCall?.function?.arguments;
     if (!argsRaw) {
@@ -155,9 +126,10 @@ Deno.serve(async (req) => {
     });
   } catch (e) {
     console.error("extract-answer-key error", e);
+    const status = e instanceof GatewayError ? e.httpStatus || 500 : 500;
     return new Response(
       JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      { status, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
 });

@@ -482,7 +482,8 @@ export async function generateReport(opts: ReportOptions): Promise<Blob> {
         const isSelected = idx === selectedIdx;
         const isCorrect = idx === key.correctIndex;
         let state: OptionState = "neutral";
-        if (isSelected && isCorrect) state = "selected-correct";
+        if (isSelected && key.correctIndex < 0) state = "selected-unknown";
+        else if (isSelected && isCorrect) state = "selected-correct";
         else if (isSelected && !isCorrect) state = "selected-wrong";
         const lines = doc.splitTextToSize(opt, usableW - PILL_PAD_X - PILL_PAD_RIGHT);
         renders.push({ lines, state });
@@ -490,7 +491,7 @@ export async function generateReport(opts: ReportOptions): Promise<Blob> {
       // Selected value not in extracted options → render it as a wrong selection
       if (!noAnswer && selectedIdx === -1) {
         const lines = doc.splitTextToSize(selected, usableW - PILL_PAD_X - PILL_PAD_RIGHT);
-        renders.push({ lines, state: "selected-wrong" });
+        renders.push({ lines, state: key.correctIndex < 0 ? "selected-unknown" : "selected-wrong" });
       }
     } else if (noAnswer) {
       const lines = doc.splitTextToSize("(No answer provided)", usableW - PILL_PAD_X - PILL_PAD_RIGHT);
