@@ -41,7 +41,8 @@ export function parseQuestionDocument(text: string): ExtractedQuestion[] {
 export async function readQuestionPdf(file: File): Promise<ExtractedQuestion[]> {
   const pdfjs = await import("pdfjs-dist");
   pdfjs.GlobalWorkerOptions.workerSrc = (await import("pdfjs-dist/build/pdf.worker.min.mjs?url")).default;
-  const document = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+  const task = pdfjs.getDocument({ data: await file.arrayBuffer() });
+  const document = await task.promise;
   try {
     let text = "";
     for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber++) {
@@ -61,6 +62,6 @@ export async function readQuestionPdf(file: File): Promise<ExtractedQuestion[]> 
     }
     return parseQuestionDocument(text);
   } finally {
-    await document.destroy();
+    await task.destroy();
   }
 }
