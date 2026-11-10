@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
-import { parseFormsWorkbook, type ParsedWorkbook, type Respondent } from "@/lib/assessmentParser";
+import { applyAssessmentTotal, parseFormsWorkbook, type ParsedWorkbook, type Respondent } from "@/lib/assessmentParser";
 import {
   generateCertificate,
   generateReport,
@@ -22,7 +22,11 @@ const Assessment = () => {
   const { admin, logout } = useAuth();
   const [parsing, setParsing] = useState(false);
   const [generating, setGenerating] = useState(false);
-  const [data, setData] = useState<ParsedWorkbook | null>(null);
+  const [sourceData, setData] = useState<ParsedWorkbook | null>(null);
+  const [totalMarks, setTotalMarks] = useState("");
+  const data = useMemo(() => sourceData
+    ? applyAssessmentTotal(sourceData, totalMarks.trim() ? Number(totalMarks) : null)
+    : null, [sourceData, totalMarks]);
   const [fileName, setFileName] = useState<string>("");
   const [assessmentTitle, setAssessmentTitle] = useState<string>("");
   const [assessmentDate, setAssessmentDate] = useState<string>(
@@ -47,6 +51,7 @@ const Assessment = () => {
         return;
       }
       setData(parsed);
+      setTotalMarks("");
       setFileName(file.name);
       setAssessmentTitle(parsed.formTitle);
       setAnswerKey(null);
@@ -319,7 +324,7 @@ const Assessment = () => {
             {/* Settings */}
             <section className="vf-card">
               <h3 className="text-base font-semibold text-space-kadet mb-4">Assessment Details</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div>
                   <label className="vf-label">Assessment Title</label>
                   <Input
@@ -335,6 +340,23 @@ const Assessment = () => {
                     value={assessmentDate}
                     onChange={(e) => setAssessmentDate(e.target.value)}
                   />
+                </div>
+                <div>
+                  <label className="vf-label" htmlFor="total-marks">Total Available Marks</label>
+                  <Input
+                    id="total-marks"
+                    type="number"
+                    min={1}
+                    value={totalMarks}
+                    onChange={(e) => setTotalMarks(e.target.value)}
+                    placeholder={sourceData?.respondents.every((r) => r.totalPossible !== null)
+                      ? String(sourceData.respondents[0]?.totalPossible ?? "")
+                      : "Required for percentage"}
+                    aria-invalid={totalMarks !== "" && (!(Number(totalMarks) > 0) || data.respondents.some((r) => r.rawScore !== null && r.rawScore > Number(totalMarks)))}
+                  />
+                  {totalMarks !== "" && data.respondents.some((r) => r.rawScore !== null && r.rawScore > Number(totalMarks)) && (
+                    <p className="text-xs text-destructive mt-1">Total marks cannot be less than awarded marks.</p>
+                  )}
                 </div>
                 <div>
                   <label className="vf-label">Pass Threshold (%)</label>
