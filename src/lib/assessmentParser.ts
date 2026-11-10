@@ -35,7 +35,7 @@ export function applyAssessmentTotal(workbook: ParsedWorkbook, total: number | n
         : respondent.totalPossible;
       const percent = respondent.rawScore !== null && respondent.rawScore >= 0 &&
         totalPossible !== null && totalPossible > 0 && respondent.rawScore <= totalPossible
-        ? (respondent.rawScore / totalPossible) * 100
+        ? (respondent.rawScore * 100) / totalPossible
         : null;
       return { ...respondent, totalPossible, percent };
     }),
@@ -111,7 +111,7 @@ export function parseFormsWorkbook(file: ArrayBuffer, formTitleFallback = "Asses
   const wb = XLSX.read(file, { type: "array" });
   const firstSheet = wb.SheetNames[0];
   const sheet = wb.Sheets[firstSheet];
-  const rows: Record<string, unknown>[] = XLSX.utils.sheet_to_json(sheet, { defval: "", raw: false })
+  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "", raw: false })
     .filter((row: Record<string, unknown>) =>
       ["ID", "Id", "id", "Name", "name", "Email", "email", "Start time", "Completion time"]
         .some((header) => String(row[header] ?? "").trim() !== ""));
@@ -196,7 +196,7 @@ export function parseFormsWorkbook(file: ArrayBuffer, formTitleFallback = "Asses
 
     const percent =
       rawScore !== null && rawScore >= 0 && totalPossible !== null && totalPossible > 0 && rawScore <= totalPossible
-        ? (rawScore / totalPossible) * 100
+        ? (rawScore * 100) / totalPossible
         : rawScore !== null && totalPossible === null
           ? null
           : null;
