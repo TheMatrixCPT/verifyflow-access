@@ -25,6 +25,23 @@ export interface ParsedWorkbook {
   respondents: Respondent[];
 }
 
+/** Awarded points do not reveal the maximum available marks. */
+export function applyAssessmentTotal(workbook: ParsedWorkbook, total: number | null): ParsedWorkbook {
+  return {
+    ...workbook,
+    respondents: workbook.respondents.map((respondent) => {
+      const totalPossible = total !== null && Number.isFinite(total) && total > 0
+        ? total
+        : respondent.totalPossible;
+      const percent = respondent.rawScore !== null && respondent.rawScore >= 0 &&
+        totalPossible !== null && totalPossible > 0 && respondent.rawScore <= totalPossible
+        ? (respondent.rawScore * 100) / totalPossible
+        : null;
+      return { ...respondent, totalPossible, percent };
+    }),
+  };
+}
+
 /** Strip @capaciti.org.za (or any email domain) and Title-Case the resulting name. */
 export function normalizeName(input: string | undefined | null): string {
   if (!input) return "Unknown Respondent";
@@ -94,7 +111,10 @@ export function parseFormsWorkbook(file: ArrayBuffer, formTitleFallback = "Asses
   const wb = XLSX.read(file, { type: "array" });
   const firstSheet = wb.SheetNames[0];
   const sheet = wb.Sheets[firstSheet];
-  const rows: Record<string, unknown>[] = XLSX.utils.sheet_to_json(sheet, { defval: "", raw: false });
+  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "", raw: false })
+    .filter((row: Record<string, unknown>) =>
+      ["ID", "Id", "id", "Name", "name", "Email", "email", "Start time", "Completion time"]
+        .some((header) => String(row[header] ?? "").trim() !== ""));
 
   if (rows.length === 0) {
     return { formTitle: firstSheet || formTitleFallback, questions: [], questionOptions: {}, respondents: [] };
@@ -145,11 +165,15 @@ export function parseFormsWorkbook(file: ArrayBuffer, formTitleFallback = "Asses
       let sum = 0;
       let possible = 0;
       let hasAny = false;
+      let hasCompleteMaximum = true;
       for (const q of questionHeaders) {
         const pHeader = pointsHeaders[q];
         if (!pHeader) continue;
         const cell = String(row[pHeader] ?? "").trim();
-        if (cell === "") continue;
+        if (cell === "") {
+          hasCompleteMaximum = false;
+          continue;
+        }
         hasAny = true;
         const slash = cell.match(/([\d.]+)\s*\/\s*([\d.]+)/);
         if (slash) {
@@ -158,18 +182,21 @@ export function parseFormsWorkbook(file: ArrayBuffer, formTitleFallback = "Asses
         } else {
           const num = parseFloat(cell);
           if (!Number.isNaN(num)) sum += num;
-          possible += 1;
+          // A bare value is awarded marks, not a question's maximum.
+          hasCompleteMaximum = false;
         }
       }
       if (hasAny) {
         rawScore = rawScore ?? sum;
-        totalPossible = possible;
+        totalPossible = hasCompleteMaximum && Object.keys(pointsHeaders).length === questionHeaders.length
+          ? possible
+          : null;
       }
     }
 
     const percent =
-      rawScore !== null && totalPossible !== null && totalPossible > 0
-        ? (rawScore / totalPossible) * 100
+      rawScore !== null && rawScore >= 0 && totalPossible !== null && totalPossible > 0 && rawScore <= totalPossible
+        ? (rawScore * 100) / totalPossible
         : rawScore !== null && totalPossible === null
           ? null
           : null;
