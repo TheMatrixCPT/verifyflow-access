@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { readQuestionPdf, type ExtractedQuestion } from "./assessmentQuestionDocument";
 
 export interface AnswerKeyEntry {
   options: string[];
@@ -54,6 +55,11 @@ function similarity(a: string, b: string): number {
 const MATCH_THRESHOLD = 0.55;
 
 export async function extractAnswerKey(file: File, questions: string[]): Promise<ExtractResult> {
+  if (file.type === "application/pdf" || /\.pdf$/i.test(file.name)) {
+    const native = await readQuestionPdf(file);
+    const matched = matchExtractedQuestions(native, questions);
+    if (matched.matched === questions.length && questions.length > 0) return matched;
+  }
   const fileBase64 = await fileToBase64(file);
   const mimeType = file.type || guessMime(file.name);
 
@@ -68,8 +74,13 @@ export async function extractAnswerKey(file: File, questions: string[]): Promise
     question: String(q.question ?? "").trim(),
     options: Array.isArray(q.options) ? q.options.map((o: any) => String(o).trim()) : [],
     correctOption: String(q.correct_option ?? "").trim(),
-    correctIndex: Number.isFinite(q.correct_index) ? q.correct_index : 0,
+    correctIndex: Number.isInteger(q.correct_index) ? q.correct_index : -1,
   }));
+
+  return matchExtractedQuestions(extracted, questions);
+}
+
+export function matchExtractedQuestions(extracted: ExtractedQuestion[], questions: string[]): ExtractResult {
 
   // Fuzzy-match extracted questions to Forms question texts
   const answerKey: AnswerKey = {};
@@ -94,11 +105,11 @@ export async function extractAnswerKey(file: File, questions: string[]): Promise
         const ci = eq.options.findIndex(
           (o) => normalize(o) === normalize(eq.correctOption),
         );
-        correctIndex = ci >= 0 ? ci : 0;
+        correctIndex = ci;
       }
       answerKey[formsQ] = {
         options: eq.options,
-        correctOption: eq.options[correctIndex] ?? eq.correctOption,
+        correctOption: correctIndex >= 0 ? eq.options[correctIndex] : "",
         correctIndex,
       };
       usedExtractedIdx.add(bestIdx);

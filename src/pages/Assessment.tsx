@@ -379,8 +379,7 @@ const Assessment = () => {
                       Answer Key Document (optional)
                     </label>
                     <p className="text-xs text-muted-foreground mt-1">
-                      Upload a PDF, DOCX, or image containing the questions and correct answers.
-                      The result report will show every option and highlight the candidate's choice + the correct answer.
+                      Questions & answer options; correct-answer markings are optional.
                     </p>
                   </div>
                   {answerKey && (
@@ -405,7 +404,7 @@ const Assessment = () => {
                   {keyExtracting ? (
                     <div className="flex items-center justify-center gap-2 text-muted-foreground">
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      <span className="text-sm">Extracting answer key with AI…</span>
+                      <span className="text-sm">Reading questions and answer options…</span>
                     </div>
                   ) : answerKey && keyStats ? (
                     <div className="flex items-center justify-center gap-3 text-space-kadet flex-wrap">
